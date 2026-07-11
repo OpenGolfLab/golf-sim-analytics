@@ -33,7 +33,7 @@ def _short(val, limit=14):
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
-def _header_label(lbl, width=12):
+def _header_label(lbl, width=10):
     """Table-column header: wrap a long config label onto two short lines
     instead of one hard truncation. Long labels (brand + club + adapter)
     used to spill into the neighbouring column AND truncate identically —
@@ -180,11 +180,13 @@ def _draw_table(ax, groups, font_scale, carry_col, bs_col, vla_col, spin_col,
     # close together instead of stranded at opposite edges — but with only
     # 1-2 groups there's unused width to the right, so spread wider and give
     # each header room to breathe instead of colliding.
-    col0 = 0.42
-    step_x = 0.28 if n <= 2 else 0.19
+    col0 = 0.40
+    step_x = 0.30 if n <= 2 else 0.19
     xs = [col0 + i * step_x for i in range(n)]
     fs = max(8, font_scale - 1)
-    hfs = max(7, font_scale - 2)
+    # Headers a step smaller than the values: at large chart-font scales two
+    # adjacent 10-char header lines otherwise still touch mid-table.
+    hfs = max(7, font_scale - 3)
 
     # Header row: "Averages" as the first-column label, in line with the config
     # headers (so every value below reads as a per-shot average). Config
