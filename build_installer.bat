@@ -12,11 +12,19 @@ if errorlevel 1 goto :fail
 
 echo.
 echo Step 2 of 2: Compiling the installer...
+rem Search each common install root for any "Inno Setup *" folder rather
+rem than a hardcoded version number, so a newer (or older) release than
+rem whatever this script was last touched for still gets found. Later
+rem matches overwrite ISCC, so the highest version number wins when more
+rem than one is installed.
 set "ISCC="
-if exist "%LocalAppData%\Programs\Inno Setup 6\ISCC.exe" set "ISCC=%LocalAppData%\Programs\Inno Setup 6\ISCC.exe"
-if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
-if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+for %%R in ("%LocalAppData%\Programs" "%ProgramFiles(x86)%" "%ProgramFiles%") do (
+    for /d %%D in ("%%~R\Inno Setup*") do (
+        if exist "%%D\ISCC.exe" set "ISCC=%%D\ISCC.exe"
+    )
+)
 if "%ISCC%"=="" goto :noiscc
+echo Using: %ISCC%
 
 "%ISCC%" "%~dp0installer\GolfSimAnalytics.iss"
 if errorlevel 1 goto :fail
@@ -34,7 +42,7 @@ echo "Add python.exe to PATH" in its installer, then re-run.
 goto :fail
 
 :noiscc
-echo ERROR: Inno Setup 6 isn't installed.
+echo ERROR: Inno Setup isn't installed.
 echo Get it from https://jrsoftware.org/isinfo.php and re-run,
 echo or install it with: winget install JRSoftware.InnoSetup
 goto :fail
