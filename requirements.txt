@@ -1,0 +1,8 @@
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.8,<4
+mplcursors>=0.5
+seaborn>=0.13
+pyarrow>=14
+customtkinter>=5.2
+pillow>=10

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime data — created next to the app on first launch; never committed
+raw_csvs/
+parquet_data/
+logs/
+settings.json
+
+# Sample-data runtime artifacts (the shipped .parquet files ARE committed;
+# anything the app writes into these folders at runtime is not)
+sample_data/*.csv.processed
+sample_data_progression/*.csv.processed
+
+# Build output
+dist/
+build/
+*.spec
+
+# Media renders (attach to a GitHub Release instead of committing)
+*.mp4
+
+# Editor / tooling
+.claude/
+.vscode/
+.idea/

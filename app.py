@@ -1,0 +1,122 @@
+"""
+Entry point. Kept as app.py (rather than renaming to main.py) so
+build_exe.bat doesn't need to change.
+
+Everything that used to live in this file — the god class, the chart
+renderers, the data plumbing — now lives in config.py, data/, live/, and
+ui/. This file just does startup plumbing: DPI awareness, logging, window
+icon, and a short fade-in so launch doesn't start with a blank white
+window popping into existence.
+"""
+from __future__ import annotations
+
+import ctypes
+import logging
+import sys
+import tkinter as tk
+
+import customtkinter as ctk
+
+from logging_setup import setup_logging
+from ui import theme
+from ui.app_window import SimAnalyticsApp
+
+
+def _set_windows_dpi_awareness() -> None:
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
+def _primary_screen_height() -> int:
+    """Physical primary-screen height in pixels. Call after DPI awareness is
+    set so Windows reports true pixels rather than a DPI-virtualized size.
+    Falls back to a 1080p baseline off-Windows or if the query fails."""
+    try:
+        return int(ctypes.windll.user32.GetSystemMetrics(1))  # SM_CYSCREEN
+    except Exception:
+        return 1080
+
+
+def _apply_ui_scaling() -> float:
+    """Resolve the display scale (a single, resolution-driven authority) and
+    apply it to customtkinter, returning the factor so the app can scale its
+    matplotlib charts to match.
+
+    customtkinter's own automatic per-monitor DPI scaling is deactivated here
+    on purpose: leaving it on top of a resolution-derived factor double-counts
+    on high-DPI panels, and the whole point of task 1 is that the UI looks the
+    same on any display regardless of how Windows happens to report its DPI.
+    So this becomes the ONE thing that decides how big everything is.
+    """
+    from data import settings as settings_mod
+
+    scale = settings_mod.resolve_scale(settings_mod.get("ui_scale"), _primary_screen_height())
+    try:
+        ctk.deactivate_automatic_dpi_awareness()
+    except Exception:
+        logging.getLogger(__name__).debug("Could not deactivate CTk auto DPI", exc_info=True)
+    ctk.set_widget_scaling(scale)
+    ctk.set_window_scaling(scale)
+    return scale
+
+
+def _set_app_icon(root: ctk.CTk) -> None:
+    try:
+        import config
+
+        ico = config.BASE_DIR / "assets" / "icon.ico"
+        png = config.BASE_DIR / "assets" / "icon.png"
+        if sys.platform == "win32" and ico.exists():
+            root.iconbitmap(str(ico))
+        elif png.exists():
+            root.iconphoto(True, tk.PhotoImage(file=str(png)))
+    except Exception:
+        logging.getLogger(__name__).debug("Could not set app icon", exc_info=True)
+
+
+def main() -> None:
+    setup_logging()
+    log = logging.getLogger(__name__)
+    log.info("Starting Golf Sim Analytics")
+
+    _set_windows_dpi_awareness()
+    theme.apply_global_theme()
+    ui_scale = _apply_ui_scaling()
+
+    try:
+        root = ctk.CTk()
+    except tk.TclError:
+        log.exception("Failed to create the main window")
+        raise
+
+    # Build the UI invisible, then fade in once everything is laid out.
+    fade_supported = True
+    try:
+        root.attributes("-alpha", 0.0)
+    except tk.TclError:
+        fade_supported = False
+
+    _set_app_icon(root)
+    SimAnalyticsApp(root, ui_scale=ui_scale)
+
+    if fade_supported:
+        def _fade_in(step: int = 0) -> None:
+            try:
+                root.attributes("-alpha", min(1.0, step / 8))
+            except tk.TclError:
+                return
+            if step < 8:
+                root.after(25, lambda: _fade_in(step + 1))
+
+        root.after(80, _fade_in)
+
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
