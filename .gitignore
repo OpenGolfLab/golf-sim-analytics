@@ -18,6 +18,9 @@ sample_data_progression/*.csv.processed
 dist/
 build/
 *.spec
+installer/Output/
+build_log.txt
+full_build_log.txt
 
 # Media renders (attach to a GitHub Release instead of committing)
 *.mp4

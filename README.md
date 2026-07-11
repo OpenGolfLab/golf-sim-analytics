@@ -51,13 +51,27 @@ That's it. On first launch the app creates its data folders (`raw_csvs/`, `parqu
 2. **Live tracking** — with GSPro running, shots are tracked continuously from GSPro's round file, enriched with club data from GSPro's own database, and archived automatically when the round ends. If a CSV export of the same round shows up later, it's reconciled into the live-tracked session instead of duplicating it.
 3. **Manual drop** — any GSPro CSV placed in `raw_csvs/` is ingested within seconds.
 
-## Building the portable exe
+## Building for distribution
+
+Two options, both Windows-only and requiring nothing on the end user's machine — no Python, no command line:
+
+**Windows installer (recommended)** — a normal double-click setup wizard (Next → Next → Finish), with a Start Menu shortcut, an optional Desktop icon, and a clean entry in *Add or Remove Programs*.
+
+```
+build_installer.bat
+```
+
+Needs [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`) in addition to Python. It builds the exe (see below) and compiles `installer/GolfSimAnalytics.iss` into `installer/Output/GolfSimAnalytics-Setup.exe` — that one file is everything you hand to a user. It installs **per-user** into `%LocalAppData%\GolfSimAnalytics` (no admin rights, no UAC prompt) — required by this app's data-storage design, since it keeps `raw_csvs/`, `parquet_data/`, and `logs/` next to its own exe, and that location has to be writable without elevation. Uninstalling removes everything the installer shipped; any data the user generated (their real shot history) is left alone.
+
+**Portable folder** — no installer, just a folder to unzip and run.
 
 ```
 build_exe.bat
 ```
 
-Produces `dist/GolfSimAnalytics.exe` plus the course photo and sample datasets alongside it — the `dist/` folder is the complete portable install and looks identical to running from source. Users put the folder anywhere writable (not `Program Files`), double-click the exe, and click through Windows SmartScreen once (*More info → Run anyway*; the exe is unsigned).
+Produces `dist/GolfSimAnalytics.exe` plus the course photo and sample datasets alongside it — the `dist/` folder is the complete portable install and looks identical to running from source. Users extract it anywhere writable (not `Program Files`) and double-click the exe directly.
+
+Either way, the exe is unsigned, so Windows SmartScreen shows a one-time warning on first run (*More info → Run anyway*).
 
 ## Development
 
