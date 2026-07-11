@@ -33,6 +33,27 @@ def _short(val, limit=14):
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
+def _header_label(lbl, width=12):
+    """Table-column header: wrap a long config label onto two short lines
+    instead of one hard truncation. Long labels (brand + club + adapter)
+    used to spill into the neighbouring column AND truncate identically —
+    "Ventus Blue Dr A1 · 9.0°" and "…C4 · 10.5°" both became "Ventus Bl…",
+    so the columns were indistinguishable exactly when comparing mattered.
+    The distinctive part of a config label is its tail, so the second line
+    (which keeps the tail) is what stays readable."""
+    words = str(lbl).split()
+    first, rest = "", ""
+    for w in words:
+        cand = (first + " " + w).strip()
+        if not rest and len(cand) <= width:
+            first = cand
+        else:
+            rest = (rest + " " + w).strip()
+    if not first:
+        return _short(str(lbl), width)
+    return first if not rest else first + "\n" + _short(rest, width)
+
+
 def _smash(df, smash_col, bs_col, cs_col):
     if smash_col:
         s = pd.to_numeric(df[smash_col], errors="coerce")
@@ -83,8 +104,11 @@ def render_comparison(fig, groups, font_scale, empty_msg, subtitle=None):
                                 zorder=0, gridsize=100)
                 except Exception:
                     pass
+            # limit=18, not the default 14: config labels share a long prefix
+            # (brand + club) and only differ at the tail, so truncating at 14
+            # produced two identical legend entries.
             ax.scatter(pts[offline_col], pts[carry_col], color=col, alpha=0.75, s=42,
-                       edgecolor="black", linewidth=0.4, zorder=1, label=_short(lbl))
+                       edgecolor="black", linewidth=0.4, zorder=1, label=_short(lbl, 18))
             mx, my = pts[offline_col].mean(), pts[carry_col].mean()
             if pd.notna(mx) and pd.notna(my):
                 ax.scatter([mx], [my], marker="X", s=220, color=col,
@@ -152,23 +176,27 @@ def _draw_table(ax, groups, font_scale, carry_col, bs_col, vla_col, spin_col,
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     n = len(groups)
-    # Columns packed left with a fixed step (4 fit the width), so 2 sessions
-    # sit close together instead of stranded at opposite edges.
-    col0, step_x = 0.42, 0.19
+    # Columns packed left (4 fit the width at step 0.19), so 2 sessions sit
+    # close together instead of stranded at opposite edges — but with only
+    # 1-2 groups there's unused width to the right, so spread wider and give
+    # each header room to breathe instead of colliding.
+    col0 = 0.42
+    step_x = 0.28 if n <= 2 else 0.19
     xs = [col0 + i * step_x for i in range(n)]
     fs = max(8, font_scale - 1)
     hfs = max(7, font_scale - 2)
 
     # Header row: "Averages" as the first-column label, in line with the config
-    # headers (so every value below reads as a per-shot average).
-    y = 0.86
+    # headers (so every value below reads as a per-shot average). Config
+    # headers wrap to two lines (see _header_label) rather than colliding.
+    y = 0.88
     ax.text(0.0, y, "Averages", color=Colors.TEXT_MUTED, fontsize=hfs,
             fontweight="bold", va="center")
     for (lbl, _sub, col), x in zip(groups, xs):
-        ax.text(x, y, _short(lbl, 10), color=col, fontsize=hfs, fontweight="bold",
-                ha="center", va="center")
+        ax.text(x, y, _header_label(lbl), color=col, fontsize=hfs, fontweight="bold",
+                ha="center", va="center", linespacing=1.25)
     right_edge = max(xs[-1] + step_x / 2, 0.6) if xs else 1.0
-    ax.plot([0.0, right_edge], [y - 0.055, y - 0.055], color=Colors.BORDER, linewidth=1.0)
+    ax.plot([0.0, right_edge], [0.79, 0.79], color=Colors.BORDER, linewidth=1.0)
 
     # Metric rows.
     y = 0.70
