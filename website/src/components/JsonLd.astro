@@ -1,0 +1,10 @@
+---
+// Renders a JSON-LD <script> tag. Pass any schema.org object as `data`.
+interface Props {
+  data: Record<string, unknown>;
+}
+const { data } = Astro.props;
+const json = JSON.stringify(data);
+---
+
+<script type="application/ld+json" set:html={json} />

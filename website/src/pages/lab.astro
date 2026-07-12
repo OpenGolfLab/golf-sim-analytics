@@ -1,0 +1,340 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { GITHUB_URL, GITHUB_WATCH_URL } from "../consts";
+
+const title = "The Lab";
+const description =
+  "The OpenGolfLab community analytics hub — an open framework where sim golfers contribute anonymized ball and club metrics to build community-driven analytics: real-world ball comparisons, gapping distributions by handicap, and launch/spin norms.";
+
+const pillars = [
+  {
+    title: "Real-world ball comparisons",
+    body: "Aggregate carry, spin and launch across balls and simulators to see how models actually differ — not marketing numbers, but community data.",
+    tag: "Balls",
+  },
+  {
+    title: "Gapping distributions by handicap",
+    body: "What does a 12-handicap's 7-iron carry, really? Distributions built from thousands of shots, sliced by skill band.",
+    tag: "Gapping",
+  },
+  {
+    title: "Launch & spin norms",
+    body: "Trustworthy reference windows for every club — so the app can flag your shots against the community, not just Tour ideals.",
+    tag: "Norms",
+  },
+];
+
+// Placeholder rows — the shape real community tables will take once data lands.
+const previewRows = [
+  { club: "Driver", carry: "—", ball: "—", launch: "—", spin: "—", n: "—" },
+  { club: "7 Iron", carry: "—", ball: "—", launch: "—", spin: "—", n: "—" },
+  { club: "PW", carry: "—", ball: "—", launch: "—", spin: "—", n: "—" },
+];
+---
+
+<BaseLayout title={title} description={description}>
+  <section class="section-tight lab-hero">
+    <div class="grid-bg"></div>
+    <div class="container lab-hero-inner">
+      <span class="pill lab-status">◐ Coming soon</span>
+      <h1>The Lab</h1>
+      <p class="lede" style="margin-top:1rem;">
+        Your data makes your game measurable. Pooled — anonymized and opt-in —
+        it makes the whole simulator community measurable. The Lab is an open
+        framework for turning thousands of sessions into analytics no single
+        golfer could ever produce alone.
+      </p>
+      <div class="hero-cta" style="margin-top:1.6rem;">
+        <a href={GITHUB_WATCH_URL} class="btn btn-primary" rel="noopener">
+          Watch the repo
+        </a>
+        <a href="/blog" class="btn btn-secondary">Follow the blog</a>
+      </div>
+      <p class="lab-noemail">
+        No newsletter, no sign-up. Watch the
+        <a href={GITHUB_URL} rel="noopener">GitHub repo</a> or follow the
+        <a href="/blog">blog</a> and you'll know the moment data goes live.
+      </p>
+    </div>
+  </section>
+
+  <div class="container lab-body">
+    <!-- Vision pillars -->
+    <section class="lab-section" aria-labelledby="vision">
+      <p class="eyebrow">The vision</p>
+      <h2 id="vision">Three things a shared dataset unlocks</h2>
+      <div class="pillars">
+        {
+          pillars.map((p) => (
+            <article class="card pillar">
+              <span class="pill">{p.tag}</span>
+              <h3>{p.title}</h3>
+              <p class="text-muted">{p.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <!-- How contribution will work -->
+    <section class="lab-section" aria-labelledby="how">
+      <p class="eyebrow">How it will work</p>
+      <h2 id="how">Open, anonymized, opt-in</h2>
+      <ol class="lab-steps">
+        <li class="card">
+          <span class="step-n tnum">01</span>
+          <div>
+            <h3>You opt in</h3>
+            <p class="text-muted">
+              Contribution is off by default. Nothing is shared unless you turn
+              it on — and even then, only stripped-down metrics leave your
+              machine.
+            </p>
+          </div>
+        </li>
+        <li class="card">
+          <span class="step-n tnum">02</span>
+          <div>
+            <h3>Metrics are anonymized</h3>
+            <p class="text-muted">
+              Ball speed, launch, spin, carry and club — never your name, your
+              rounds, or anything that identifies you. The raw data stays local.
+            </p>
+          </div>
+        </li>
+        <li class="card">
+          <span class="step-n tnum">03</span>
+          <div>
+            <h3>The community benefits</h3>
+            <p class="text-muted">
+              Aggregates flow back into open tables and charts anyone can use —
+              and into better benchmarks inside the app itself.
+            </p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <!-- Data preview (structured so real tables/charts slot in later) -->
+    <section class="lab-section" aria-labelledby="preview">
+      <p class="eyebrow">Preview</p>
+      <h2 id="preview">Community gapping — by handicap</h2>
+      <p class="text-muted" style="max-width:60ch;margin-bottom:1.25rem;">
+        This is the structure the first dataset will fill. Values are
+        placeholders until contributions begin.
+      </p>
+
+      <div class="table-wrap" role="region" aria-label="Community gapping preview table" tabindex="0">
+        <table class="data-table">
+          <caption class="sr-only">
+            Community gapping preview by club — carry, ball speed, launch, spin
+            and sample size. Placeholder values.
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Club</th>
+              <th scope="col">Carry (yd)</th>
+              <th scope="col">Ball (mph)</th>
+              <th scope="col">Launch (°)</th>
+              <th scope="col">Spin (rpm)</th>
+              <th scope="col">Shots</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              previewRows.map((r) => (
+                <tr>
+                  <th scope="row">{r.club}</th>
+                  <td>{r.carry}</td>
+                  <td>{r.ball}</td>
+                  <td>{r.launch}</td>
+                  <td>{r.spin}</td>
+                  <td>{r.n}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Chart slot: drop a Chart.js/SVG viz here when data is ready -->
+      <div class="chart-slot" aria-hidden="true">
+        <div class="grid-bg" style="opacity:0.6"></div>
+        <p class="chart-slot-label">Distribution charts land here</p>
+      </div>
+    </section>
+
+    <section class="lab-section lab-cta">
+      <div class="card lab-cta-card">
+        <h2>Help shape the framework</h2>
+        <p class="text-muted" style="margin-top:0.5rem;max-width:56ch;">
+          The Lab is being built in the open. Ideas about schema, privacy, or
+          which analytics matter most are welcome on GitHub.
+        </p>
+        <div class="hero-cta" style="margin-top:1.2rem;">
+          <a href={GITHUB_URL} class="btn btn-primary" rel="noopener">Open on GitHub</a>
+          <a href="/download" class="btn btn-secondary">Get the app</a>
+        </div>
+      </div>
+    </section>
+  </div>
+</BaseLayout>
+
+<style>
+  .lab-hero {
+    position: relative;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+    background: radial-gradient(
+      120% 90% at 50% -20%,
+      rgba(61, 220, 132, 0.09),
+      transparent 60%
+    );
+  }
+  .lab-hero-inner {
+    position: relative;
+    z-index: 1;
+    padding-block: clamp(2.5rem, 6vw, 4rem);
+    max-width: 64ch;
+  }
+  .lab-status {
+    color: var(--green);
+    border-color: var(--green-dim);
+    margin-bottom: 1rem;
+  }
+  .lab-noemail {
+    margin-top: 1.3rem;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+  }
+
+  .lab-body {
+    display: flex;
+    flex-direction: column;
+    gap: clamp(2.5rem, 6vw, 4rem);
+    padding-block: clamp(2.5rem, 6vw, 4rem);
+  }
+  .lab-section h2 {
+    margin-bottom: 1.4rem;
+  }
+
+  .pillars {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.1rem;
+  }
+  .pillar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    align-items: flex-start;
+  }
+  .pillar h3 {
+    font-size: 1.15rem;
+  }
+
+  .lab-steps {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.1rem;
+  }
+  .lab-steps li {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.9rem;
+    align-items: start;
+  }
+  .lab-steps h3 {
+    font-size: 1.1rem;
+  }
+  .lab-steps p {
+    margin-top: 0.35rem;
+  }
+  .step-n {
+    font-family: var(--font-mono);
+    color: var(--green);
+    font-size: 1rem;
+    letter-spacing: 0.08em;
+    padding-top: 0.15rem;
+  }
+
+  /* Data table */
+  .table-wrap {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow-x: auto;
+    background: var(--surface);
+  }
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+  }
+  .data-table th,
+  .data-table td {
+    padding: 0.85rem 1.1rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .data-table thead th {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 600;
+    background: var(--bg-elevated);
+  }
+  .data-table th[scope="col"]:first-child,
+  .data-table th[scope="row"] {
+    text-align: left;
+  }
+  .data-table th[scope="row"] {
+    color: var(--green);
+    font-family: var(--font-head);
+    font-weight: 600;
+  }
+  .data-table tbody tr:last-child th,
+  .data-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* Chart slot */
+  .chart-slot {
+    position: relative;
+    overflow: hidden;
+    margin-top: 1.25rem;
+    height: 220px;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius);
+    display: grid;
+    place-items: center;
+    background: var(--bg-elevated);
+  }
+  .chart-slot-label {
+    position: relative;
+    z-index: 1;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+  }
+
+  .lab-cta-card {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: clamp(1.75rem, 4vw, 2.75rem);
+  }
+
+  @media (max-width: 860px) {
+    .pillars,
+    .lab-steps {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

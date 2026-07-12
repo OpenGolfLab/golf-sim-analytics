@@ -1,0 +1,52 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="404 — Off the fairway"
+  description="That page couldn't be found."
+>
+  <section class="nf">
+    <div class="grid-bg"></div>
+    <div class="container nf-inner">
+      <span class="stat-chip"><span class="label">Status</span><b>404</b></span>
+      <h1>That shot sailed out of bounds</h1>
+      <p class="lede mx-auto" style="text-align:center;">
+        The page you're after isn't here. It may have moved, or the link was
+        mistyped — happens to the best of us.
+      </p>
+      <div class="hero-cta" style="justify-content:center;margin-top:1.6rem;">
+        <a href="/" class="btn btn-primary">Back to home</a>
+        <a href="/download" class="btn btn-secondary">Download the app</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .nf {
+    position: relative;
+    overflow: hidden;
+    min-height: calc(100vh - var(--nav-h) - 200px);
+    display: grid;
+    place-items: center;
+    text-align: center;
+    background: radial-gradient(
+      120% 80% at 50% 0%,
+      rgba(61, 220, 132, 0.08),
+      transparent 60%
+    );
+  }
+  .nf-inner {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding-block: clamp(3rem, 8vw, 6rem);
+  }
+  .nf h1 {
+    margin-top: 0.5rem;
+  }
+</style>

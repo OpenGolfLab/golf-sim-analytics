@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="OpenGolfLab">
+  <rect width="32" height="32" rx="7" fill="#0d1117"/>
+  <!-- shot trace: a launch-to-apex-to-landing arc -->
+  <path d="M5 26 C 11 6, 20 4, 27 15"
+        fill="none" stroke="#3ddc84" stroke-width="2.2"
+        stroke-linecap="round" stroke-dasharray="0.1 4.4"/>
+  <path d="M5 26 C 11 6, 20 4, 27 15"
+        fill="none" stroke="#3ddc84" stroke-width="2.2"
+        stroke-linecap="round" opacity="0.28"/>
+  <!-- launch point -->
+  <circle cx="5" cy="26" r="2.1" fill="#3ddc84"/>
+  <!-- dispersion cluster around the landing zone -->
+  <circle cx="27" cy="15" r="1.7" fill="#57f294"/>
+  <circle cx="24.2" cy="13" r="1.2" fill="#3ddc84" opacity="0.85"/>
+  <circle cx="28.8" cy="18.4" r="1.1" fill="#3ddc84" opacity="0.7"/>
+  <circle cx="23.5" cy="17.6" r="0.95" fill="#3ddc84" opacity="0.55"/>
+</svg>

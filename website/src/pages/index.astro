@@ -1,0 +1,473 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Screenshot from "../components/Screenshot.astro";
+import {
+  LATEST_RELEASE_URL,
+  PRODUCT_NAME,
+  SITE_TAGLINE,
+} from "../consts";
+
+const features = [
+  {
+    title: "Zero-click data capture",
+    body: "Practice Range CSV exports are picked up from your Desktop automatically — no import buttons. Live rounds track in real time from GSPro's round file and archive themselves the moment the round ends.",
+    metric: "0",
+    unit: "clicks to import",
+  },
+  {
+    title: "15 interactive dashboards",
+    body: "Six categories — Metrics, Optimization, Club Fitting, Speed Training, On-Course and Live — covering dispersion, gapping, trajectory, swing efficiency, shot shape and more.",
+    metric: "15",
+    unit: "dashboards",
+  },
+  {
+    title: "Deep per-shot analytics",
+    body: "Hover any point for carry, ball speed, launch, descent, spin and smash factor — each flagged against that club's ideal window so you see exactly where a shot fell out of spec.",
+    metric: "6+",
+    unit: "metrics per shot",
+  },
+  {
+    title: "Benchmarks in one click",
+    body: "Overlay PGA Tour averages or any handicap level from 5 to 20 to see how your numbers stack up against a real target.",
+    metric: "5–20",
+    unit: "handicap overlays",
+  },
+  {
+    title: "Built-in fitting bay",
+    body: "Run adapter and shaft settings head-to-head with live shot capture. A/B two configurations and let the dispersion tell you which one to keep.",
+    metric: "A/B",
+    unit: "live comparison",
+  },
+  {
+    title: "Local-first & private",
+    body: "Every shot lives in Parquet files right next to the app. Nothing leaves your machine, there's no account, and it's completely free.",
+    metric: "100%",
+    unit: "on your machine",
+  },
+];
+
+const categories = [
+  { name: "Metrics", items: "Dispersion · Trajectory · Club Gapping · Swing Efficiency · Shot Quality · Shot & Club Trends" },
+  { name: "Optimization", items: "Launch & Spin · Session Comparison · Shot Shape" },
+  { name: "Club Fitting", items: "Adapter A/B testing with live shot capture" },
+  { name: "Speed Training", items: "Cruising speed · Fatigue curve · Long-term progression" },
+  { name: "On-Course", items: "Automatic scorecards" },
+  { name: "Live", items: "Real-time dispersion" },
+];
+
+const steps = [
+  {
+    n: "01",
+    title: "Export or play",
+    body: "Hit export in GSPro's Practice Range, or just start a round. That's the only thing you do.",
+  },
+  {
+    n: "02",
+    title: "Auto-ingest",
+    body: "The app watches for GSPro's files, ingests them the instant they appear, and files everything into local Parquet.",
+  },
+  {
+    n: "03",
+    title: "Explore dashboards",
+    body: "Open any of the 15 dashboards, hover shots for full metrics, and drop in Tour or handicap benchmarks.",
+  },
+];
+---
+
+<BaseLayout>
+  <!-- ============================ HERO ============================ -->
+  <section class="hero">
+    <div class="grid-bg"></div>
+    <div class="container hero-inner">
+      <p class="eyebrow">Open golf simulator analytics · for GSPro</p>
+      <h1 class="hero-title">{SITE_TAGLINE}</h1>
+      <p class="lede hero-lede">
+        {PRODUCT_NAME} is a free Windows app that turns your GSPro sessions into
+        deep, interactive analytics — automatically. No imports, no accounts,
+        no data leaving your machine.
+      </p>
+
+      <div class="hero-cta">
+        <a href="/download" class="btn btn-primary btn-lg">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+            ><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            ></path></svg
+          >
+          Download for Windows
+        </a>
+        <a href="/blog" class="btn btn-secondary btn-lg">Read the blog</a>
+      </div>
+
+      <div class="hero-chips" role="list" aria-label="Example shot readout">
+        <span class="stat-chip" role="listitem"
+          ><span class="label">Smash</span><b>1.49</b></span
+        >
+        <span class="stat-chip" role="listitem"
+          ><span class="label">Carry</span><b>285</b> yd</span
+        >
+        <span class="stat-chip" role="listitem"
+          ><span class="label">Ball</span><b>167</b> mph</span
+        >
+        <span class="stat-chip" role="listitem"
+          ><span class="label">Launch</span><b>14.2</b>°</span
+        >
+        <span class="stat-chip" role="listitem"
+          ><span class="label">Spin</span><b>2,610</b> rpm</span
+        >
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== HERO SCREENSHOT ===================== -->
+  <section class="container hero-shot">
+    <Screenshot
+      src="/images/screenshots/home.jpg"
+      alt="Golf Sim Analytics home dashboard showing a session summary with carry distances, a dispersion plot, and per-club metrics."
+      loading="eager"
+      caption="The home dashboard — a live readout of your latest session."
+    />
+  </section>
+
+  <!-- ========================= FEATURES ========================= -->
+  <section id="features" class="section">
+    <div class="container">
+      <p class="eyebrow">What it does</p>
+      <h2>Everything about your ball flight, without the busywork</h2>
+      <p class="lede" style="margin-top:0.75rem;">
+        Tighten your gapping, diagnose your misses, and dial in equipment —
+        from the same data GSPro already produces.
+      </p>
+
+      <div class="feature-grid">
+        {
+          features.map((f) => (
+            <article class="card feature">
+              <div class="feature-metric">
+                <span class="feature-num tnum">{f.metric}</span>
+                <span class="feature-unit">{f.unit}</span>
+              </div>
+              <h3>{f.title}</h3>
+              <p class="text-muted">{f.body}</p>
+            </article>
+          ))
+        }
+      </div>
+
+      <!-- dashboards by category -->
+      <div class="cats">
+        <p class="cats-head">15 dashboards, six categories</p>
+        <ul class="cats-list">
+          {
+            categories.map((c) => (
+              <li class="cat">
+                <span class="cat-name">{c.name}</span>
+                <span class="cat-items">{c.items}</span>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= SCREENSHOTS ======================= -->
+  <section id="screens" class="section" style="padding-top:0;">
+    <div class="container">
+      <p class="eyebrow">A look inside</p>
+      <h2>Data-forward, every screen</h2>
+
+      <div class="screens-grid">
+        <Screenshot
+          src="/images/screenshots/dispersion.jpg"
+          alt="Dispersion dashboard plotting shot landing positions with left-right and carry scatter, colored by club, against an ideal target ellipse."
+          caption="Dispersion — see the shape and tightness of every club."
+        />
+        <Screenshot
+          src="/images/screenshots/gapping_benchmarks.jpg"
+          alt="Club gapping chart with carry-distance bars for each club overlaid with PGA Tour benchmark markers to reveal distance gaps."
+          caption="Club gapping with one-click Tour and handicap benchmarks."
+        />
+        <Screenshot
+          src="/images/screenshots/live.jpg"
+          alt="Live dashboard updating a dispersion plot in real time as new shots arrive during a GSPro session."
+          caption="Live — real-time dispersion as you hit."
+        />
+        <Screenshot
+          src="/images/screenshots/speed_training.jpg"
+          alt="Speed training dashboard showing cruising clubhead speed, a fatigue curve across a session, and long-term speed progression."
+          caption="Speed training — cruising speed, fatigue and progression."
+        />
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= HOW IT WORKS ======================= -->
+  <section id="how" class="section how">
+    <div class="container">
+      <p class="eyebrow">How it works</p>
+      <h2>Three steps, and two of them are just playing golf</h2>
+
+      <ol class="steps">
+        {
+          steps.map((s) => (
+            <li class="step card">
+              <span class="step-n tnum">{s.n}</span>
+              <h3>{s.title}</h3>
+              <p class="text-muted">{s.body}</p>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <!-- ========================= LAB TEASER ======================== -->
+  <section class="section">
+    <div class="container">
+      <div class="lab-teaser card">
+        <div class="grid-bg" style="opacity:0.5"></div>
+        <div class="lab-teaser-inner">
+          <p class="eyebrow">Coming next · OpenGolfLab</p>
+          <h2>An open lab for sim golf data</h2>
+          <p class="lede" style="margin-top:0.75rem;">
+            The app makes your data useful. The Lab makes everyone's data
+            useful — an open framework where sim golfers contribute anonymized
+            ball and club metrics to build community-driven analytics: real-world
+            ball comparisons, gapping distributions by handicap, and launch/spin
+            norms you can actually trust.
+          </p>
+          <div class="hero-cta">
+            <a href="/lab" class="btn btn-primary">Explore the Lab</a>
+            <a href="/blog" class="btn btn-secondary">Follow along</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================= FINAL CTA ========================= -->
+  <section class="section-tight">
+    <div class="container final-cta">
+      <h2>Start with your very next session</h2>
+      <p class="lede mx-auto" style="margin-top:0.6rem;">
+        Free, private, and Windows-ready. Install it, play, and watch your
+        numbers show up.
+      </p>
+      <div class="hero-cta" style="justify-content:center;">
+        <a href="/download" class="btn btn-primary btn-lg">Download for Windows</a>
+        <a href={LATEST_RELEASE_URL} class="btn btn-secondary btn-lg" rel="noopener"
+          >View releases</a
+        >
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  /* ---- Hero ---- */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+    background: radial-gradient(
+      120% 90% at 50% -10%,
+      rgba(61, 220, 132, 0.08),
+      transparent 60%
+    );
+  }
+  .hero-inner {
+    position: relative;
+    z-index: 1;
+    padding-block: clamp(3.5rem, 9vw, 6.5rem) clamp(2.5rem, 6vw, 4rem);
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .hero-title {
+    margin-top: 0.4rem;
+    background: linear-gradient(180deg, #ffffff 0%, #c7d2dd 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero-lede {
+    margin-top: 1.2rem;
+    text-align: center;
+  }
+  .hero-cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    margin-top: 1.8rem;
+    justify-content: center;
+  }
+  .hero-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    justify-content: center;
+    margin-top: 2rem;
+  }
+
+  .hero-shot {
+    margin-top: -2.5rem;
+    position: relative;
+    z-index: 2;
+    margin-bottom: 1rem;
+  }
+
+  /* ---- Feature grid ---- */
+  .feature-grid {
+    margin-top: 2.5rem;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.1rem;
+  }
+  .feature {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .feature-metric {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+  .feature-num {
+    font-family: var(--font-head);
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--green);
+    line-height: 1;
+  }
+  .feature-unit {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-dim);
+  }
+  .feature h3 {
+    font-size: 1.15rem;
+  }
+
+  /* ---- Categories ---- */
+  .cats {
+    margin-top: 2rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 1.5rem;
+  }
+  .cats-head {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+  }
+  .cats-list {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.9rem 2rem;
+  }
+  .cat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding-bottom: 0.9rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .cat-name {
+    font-family: var(--font-head);
+    font-weight: 600;
+    color: var(--green);
+    font-size: 0.98rem;
+  }
+  .cat-items {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+
+  /* ---- Screenshots grid ---- */
+  .screens-grid {
+    margin-top: 2rem;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.4rem;
+  }
+
+  /* ---- How it works ---- */
+  .steps {
+    margin-top: 2.5rem;
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.1rem;
+    counter-reset: step;
+  }
+  .step {
+    position: relative;
+  }
+  .step-n {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    color: var(--green);
+    letter-spacing: 0.1em;
+  }
+  .step h3 {
+    margin-top: 0.6rem;
+    font-size: 1.2rem;
+  }
+  .step p {
+    margin-top: 0.4rem;
+  }
+
+  /* ---- Lab teaser ---- */
+  .lab-teaser {
+    position: relative;
+    overflow: hidden;
+    padding: clamp(1.75rem, 4vw, 3rem);
+    background: linear-gradient(135deg, var(--surface) 0%, var(--bg-elevated) 100%);
+  }
+  .lab-teaser-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 62ch;
+  }
+
+  /* ---- Final CTA ---- */
+  .final-cta {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* ---- Responsive ---- */
+  @media (max-width: 900px) {
+    .feature-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .steps {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (max-width: 680px) {
+    .feature-grid,
+    .screens-grid,
+    .cats-list {
+      grid-template-columns: 1fr;
+    }
+    .hero-shot {
+      margin-top: -1rem;
+    }
+  }
+</style>

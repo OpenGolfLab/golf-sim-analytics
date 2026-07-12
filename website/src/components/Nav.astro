@@ -1,0 +1,157 @@
+---
+import Logo from "./Logo.astro";
+import { NAV_LINKS } from "../consts";
+
+// Normalize the current path (strip trailing slash) for active-link matching.
+const path = Astro.url.pathname.replace(/\/+$/, "") || "/";
+const isActive = (href: string) => {
+  if (href === "/") return path === "/";
+  return path === href || path.startsWith(href + "/");
+};
+---
+
+<header class="nav">
+  <div class="container nav-inner">
+    <a href="/" class="nav-logo" aria-label="OpenGolfLab — home">
+      <Logo />
+    </a>
+
+    <input type="checkbox" id="nav-toggle" class="nav-toggle-input" />
+    <label for="nav-toggle" class="nav-toggle" aria-label="Toggle menu">
+      <span></span><span></span><span></span>
+    </label>
+
+    <nav class="nav-links" aria-label="Primary">
+      {
+        NAV_LINKS.map((link) => (
+          <a
+            href={link.href}
+            class:list={["nav-link", { active: isActive(link.href) }]}
+            aria-current={isActive(link.href) ? "page" : undefined}
+          >
+            {link.label}
+          </a>
+        ))
+      }
+      <a href="/download" class="btn btn-primary nav-cta">Download</a>
+    </nav>
+  </div>
+</header>
+
+<style>
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(13, 17, 23, 0.72);
+    backdrop-filter: saturate(140%) blur(12px);
+    -webkit-backdrop-filter: saturate(140%) blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: var(--nav-h);
+    gap: 1rem;
+  }
+  .nav-logo {
+    display: inline-flex;
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .nav-link {
+    font-family: var(--font-head);
+    font-weight: 500;
+    font-size: 0.95rem;
+    color: var(--text-muted);
+    padding: 0.5rem 0.8rem;
+    border-radius: var(--radius-sm);
+    transition: color 0.15s var(--ease), background 0.15s var(--ease);
+  }
+  .nav-link:hover {
+    color: var(--text);
+    background: var(--surface);
+  }
+  .nav-link.active {
+    color: var(--green);
+  }
+  .nav-cta {
+    margin-left: 0.5rem;
+    padding: 0.55rem 1.1rem;
+    font-size: 0.92rem;
+  }
+
+  /* Mobile menu toggle (CSS-only, no JS) */
+  .nav-toggle-input {
+    display: none;
+  }
+  .nav-toggle {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    width: 44px;
+    height: 44px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+  }
+  .nav-toggle span {
+    display: block;
+    height: 2px;
+    width: 22px;
+    margin-inline: auto;
+    background: var(--text);
+    border-radius: 2px;
+    transition: transform 0.2s var(--ease), opacity 0.2s var(--ease);
+  }
+
+  @media (max-width: 760px) {
+    .nav-toggle {
+      display: flex;
+    }
+    .nav-links {
+      position: absolute;
+      top: var(--nav-h);
+      left: 0;
+      right: 0;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.15rem;
+      padding: 0.75rem clamp(1rem, 4vw, 2rem) 1.25rem;
+      background: rgba(13, 17, 23, 0.97);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      transform: translateY(-8px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s var(--ease), transform 0.18s var(--ease);
+    }
+    .nav-link {
+      padding: 0.7rem 0.8rem;
+      font-size: 1.05rem;
+    }
+    .nav-cta {
+      margin-left: 0;
+      margin-top: 0.4rem;
+      justify-content: center;
+    }
+    .nav-toggle-input:checked ~ .nav-links {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    .nav-toggle-input:checked ~ .nav-toggle span:nth-child(1) {
+      transform: translateY(7px) rotate(45deg);
+    }
+    .nav-toggle-input:checked ~ .nav-toggle span:nth-child(2) {
+      opacity: 0;
+    }
+    .nav-toggle-input:checked ~ .nav-toggle span:nth-child(3) {
+      transform: translateY(-7px) rotate(-45deg);
+    }
+  }
+</style>

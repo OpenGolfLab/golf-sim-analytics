@@ -1,0 +1,198 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import FormattedDate from "../../components/FormattedDate.astro";
+
+const title = "Blog";
+const description =
+  "Updates from OpenGolfLab — releases, deep dives on simulator analytics, and progress on the community data Lab.";
+
+const posts = (await getCollection("blog", ({ data }) => !data.draft)).sort(
+  (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf()
+);
+
+const [featured, ...rest] = posts;
+---
+
+<BaseLayout title={title} description={description}>
+  <section class="section-tight blog-hero">
+    <div class="grid-bg"></div>
+    <div class="container blog-hero-inner">
+      <p class="eyebrow">Field notes</p>
+      <h1>The OpenGolfLab blog</h1>
+      <p class="lede" style="margin-top:0.9rem;">
+        Release notes, analytics deep dives, and progress on the open community
+        Lab. Prefer a reader? <a href="/rss.xml">Grab the RSS feed.</a>
+      </p>
+    </div>
+  </section>
+
+  <div class="container blog-body">
+    {
+      posts.length === 0 ? (
+        <p class="text-muted">No posts yet — check back soon.</p>
+      ) : (
+        <>
+          {featured && (
+            <a href={`/blog/${featured.id}/`} class="feature-post card">
+              {featured.data.heroImage && (
+                <img
+                  class="feature-post-img"
+                  src={featured.data.heroImage}
+                  alt={`Illustration for “${featured.data.title}”`}
+                  width="1600"
+                  height="900"
+                  loading="eager"
+                />
+              )}
+              <div class="feature-post-body">
+                <div class="post-meta">
+                  <span class="pill pill-latest">Latest</span>
+                  <FormattedDate date={featured.data.pubDate} />
+                </div>
+                <h2>{featured.data.title}</h2>
+                <p class="text-muted">{featured.data.description}</p>
+                <span class="read-more">Read post →</span>
+              </div>
+            </a>
+          )}
+
+          {rest.length > 0 && (
+            <ul class="post-list">
+              {rest.map((post) => (
+                <li>
+                  <a href={`/blog/${post.id}/`} class="post-card card">
+                    <div class="post-meta">
+                      <FormattedDate date={post.data.pubDate} />
+                    </div>
+                    <h3>{post.data.title}</h3>
+                    <p class="text-muted">{post.data.description}</p>
+                    {post.data.tags.length > 0 && (
+                      <div class="post-card-tags">
+                        {post.data.tags.map((t) => (
+                          <span class="pill">#{t}</span>
+                        ))}
+                      </div>
+                    )}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )
+    }
+  </div>
+</BaseLayout>
+
+<style>
+  .blog-hero {
+    position: relative;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+  }
+  .blog-hero-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 60ch;
+    padding-block: clamp(2.5rem, 6vw, 3.5rem);
+  }
+  .blog-body {
+    padding-block: clamp(2.5rem, 6vw, 3.5rem);
+    display: flex;
+    flex-direction: column;
+    gap: 1.6rem;
+  }
+  .post-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--green);
+    letter-spacing: 0.02em;
+  }
+
+  /* Featured */
+  .feature-post {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+    color: inherit;
+  }
+  .feature-post:hover {
+    border-color: var(--green-dim);
+  }
+  .feature-post-img {
+    width: 100%;
+    height: 100%;
+    min-height: 260px;
+    object-fit: cover;
+    border-right: 1px solid var(--border);
+  }
+  .feature-post-body {
+    padding: clamp(1.5rem, 3vw, 2.25rem);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.6rem;
+  }
+  .feature-post-body h2 {
+    font-size: clamp(1.5rem, 3vw, 2rem);
+  }
+  .pill-latest {
+    color: var(--green);
+    border-color: var(--green-dim);
+  }
+  .read-more {
+    margin-top: 0.5rem;
+    font-family: var(--font-head);
+    font-weight: 600;
+    color: var(--green);
+  }
+
+  /* List */
+  .post-list {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.1rem;
+  }
+  .post-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    height: 100%;
+    color: inherit;
+  }
+  .post-card:hover {
+    border-color: var(--green-dim);
+  }
+  .post-card h3 {
+    font-size: 1.25rem;
+  }
+  .post-card-tags {
+    margin-top: auto;
+    padding-top: 0.6rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  @media (max-width: 780px) {
+    .feature-post {
+      grid-template-columns: 1fr;
+    }
+    .feature-post-img {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      min-height: 200px;
+    }
+    .post-list {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

@@ -1,0 +1,64 @@
+---
+// Inline SVG logo mark (abstract shot-trace / dispersion motif).
+// No external image dependency — same motif as the favicon.
+interface Props {
+  size?: number;
+  withWordmark?: boolean;
+  class?: string;
+}
+const { size = 28, withWordmark = true, class: klass = "" } = Astro.props;
+---
+
+<span class:list={["logo", klass]}>
+  <svg
+    class="logo-mark"
+    width={size}
+    height={size}
+    viewBox="0 0 32 32"
+    fill="none"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <path
+      d="M5 26 C 11 6, 20 4, 27 15"
+      fill="none"
+      stroke="var(--green)"
+      stroke-width="2.2"
+      stroke-linecap="round"
+      stroke-dasharray="0.1 4.4"></path>
+    <circle cx="5" cy="26" r="2.1" fill="var(--green)"></circle>
+    <circle cx="27" cy="15" r="1.7" fill="var(--green-bright)"></circle>
+    <circle cx="24.2" cy="13" r="1.2" fill="var(--green)" opacity="0.85"></circle>
+    <circle cx="28.8" cy="18.4" r="1.1" fill="var(--green)" opacity="0.7"></circle>
+    <circle cx="23.5" cy="17.6" r="0.95" fill="var(--green)" opacity="0.55"></circle>
+  </svg>
+  {
+    withWordmark && (
+      <span class="logo-word">
+        Open<span class="logo-word-accent">GolfLab</span>
+      </span>
+    )
+  }
+</span>
+
+<style>
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .logo-mark {
+    flex: none;
+  }
+  .logo-word {
+    font-family: var(--font-head);
+    font-weight: 600;
+    font-size: 1.15rem;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    line-height: 1;
+  }
+  .logo-word-accent {
+    color: var(--green);
+  }
+</style>

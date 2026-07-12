@@ -1,0 +1,142 @@
+---
+import type { CollectionEntry } from "astro:content";
+import BaseLayout from "./BaseLayout.astro";
+import JsonLd from "../components/JsonLd.astro";
+import FormattedDate from "../components/FormattedDate.astro";
+import { SITE_URL, SITE_TITLE } from "../consts";
+
+type Props = CollectionEntry<"blog">["data"] & { slug: string };
+
+const { title, description, pubDate, updatedDate, heroImage, tags, slug } =
+  Astro.props;
+
+const postUrl = `${SITE_URL}/blog/${slug}/`;
+
+const blogLd = {
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  headline: title,
+  description,
+  datePublished: pubDate.toISOString(),
+  dateModified: (updatedDate ?? pubDate).toISOString(),
+  ...(heroImage ? { image: new URL(heroImage, SITE_URL).href } : {}),
+  author: { "@type": "Organization", name: SITE_TITLE, url: SITE_URL },
+  publisher: { "@type": "Organization", name: SITE_TITLE, url: SITE_URL },
+  mainEntityOfPage: { "@type": "WebPage", "@id": postUrl },
+  url: postUrl,
+  keywords: tags.join(", "),
+};
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  image={heroImage ?? "/images/screenshots/dispersion.jpg"}
+  type="article"
+  publishedTime={pubDate.toISOString()}
+>
+  <JsonLd slot="head" data={blogLd} />
+
+  <article class="post">
+    <div class="container post-head-wrap">
+      <a href="/blog" class="back-link">← All posts</a>
+      <header class="post-head">
+        <div class="post-meta">
+          <FormattedDate date={pubDate} />
+          {
+            updatedDate && (
+              <span class="updated">
+                · updated <FormattedDate date={updatedDate} />
+              </span>
+            )
+          }
+        </div>
+        <h1>{title}</h1>
+        <p class="lede post-desc">{description}</p>
+        {
+          tags.length > 0 && (
+            <ul class="post-tags">
+              {tags.map((t) => (
+                <li class="pill">#{t}</li>
+              ))}
+            </ul>
+          )
+        }
+      </header>
+    </div>
+
+    {
+      heroImage && (
+        <div class="container">
+          <img
+            class="post-hero"
+            src={heroImage}
+            alt={`Illustration for “${title}”`}
+            width="1600"
+            height="840"
+            loading="eager"
+          />
+        </div>
+      )
+    }
+
+    <div class="container post-body">
+      <div class="prose">
+        <slot />
+      </div>
+    </div>
+  </article>
+</BaseLayout>
+
+<style>
+  .post-head-wrap {
+    padding-top: 2.5rem;
+  }
+  .back-link {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+  .back-link:hover {
+    color: var(--green);
+  }
+  .post-head {
+    max-width: 70ch;
+    margin-top: 1.25rem;
+  }
+  .post-meta {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--green);
+    letter-spacing: 0.03em;
+  }
+  .updated {
+    color: var(--text-dim);
+  }
+  .post-head h1 {
+    margin-top: 0.7rem;
+    font-size: clamp(2rem, 5vw, 3rem);
+  }
+  .post-desc {
+    margin-top: 1rem;
+  }
+  .post-tags {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1.1rem;
+  }
+  .post-hero {
+    width: 100%;
+    margin-top: 2rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-strong);
+    aspect-ratio: 1600 / 840;
+    object-fit: cover;
+  }
+  .post-body {
+    padding-block: 2.5rem 1rem;
+  }
+</style>

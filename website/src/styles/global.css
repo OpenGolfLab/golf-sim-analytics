@@ -1,0 +1,409 @@
+/* =========================================================================
+   OpenGolfLab — global design system
+   Dark, data-forward. Near-black canvas, fairway-green accent,
+   technical geometric headings, tabular numerals for data.
+   ========================================================================= */
+
+:root {
+  /* ---- Surfaces ---- */
+  --bg: #0d1117;
+  --bg-elevated: #131922;
+  --surface: #161b22;
+  --surface-2: #1c232d;
+  --border: #262d38;
+  --border-strong: #333c49;
+
+  /* ---- Text ---- */
+  --text: #e6edf3;
+  --text-muted: #9aa7b4;
+  --text-dim: #6e7b8a;
+
+  /* ---- Accent: electric fairway green ---- */
+  --green: #3ddc84;
+  --green-bright: #57f294;
+  --green-dim: #1f7a48;
+  --green-ink: #04150c; /* text ON green */
+  --green-glow: rgba(61, 220, 132, 0.35);
+
+  /* ---- Data hues (charts / chips) ---- */
+  --cyan: #4fd6e0;
+  --amber: #ffcf5c;
+  --violet: #b98cff;
+
+  /* ---- Type ---- */
+  --font-head: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* ---- Layout ---- */
+  --maxw: 1120px;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --gap: clamp(1rem, 2vw, 1.5rem);
+  --nav-h: 64px;
+
+  --shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.7);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* ---------- Reset ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+* {
+  margin: 0;
+}
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+img,
+picture,
+svg,
+video {
+  display: block;
+  max-width: 100%;
+}
+img {
+  height: auto;
+}
+
+/* ---------- Typography ---------- */
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-head);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  text-wrap: balance;
+}
+h1 {
+  font-size: clamp(2.4rem, 6vw, 4rem);
+}
+h2 {
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+h3 {
+  font-size: clamp(1.2rem, 2.4vw, 1.5rem);
+}
+p {
+  text-wrap: pretty;
+}
+a {
+  color: var(--green);
+  text-decoration: none;
+  transition: color 0.15s var(--ease);
+}
+a:hover {
+  color: var(--green-bright);
+}
+
+/* Numbers should be tabular wherever they appear as data. */
+.tnum,
+.stat-chip,
+.metric,
+table td,
+table th,
+time {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ---------- Accessibility ---------- */
+:focus-visible {
+  outline: 3px solid var(--green);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 200;
+  background: var(--green);
+  color: var(--green-ink);
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  transition: top 0.2s var(--ease);
+}
+.skip-link:focus {
+  top: 12px;
+  color: var(--green-ink);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Layout helpers ---------- */
+.container {
+  width: 100%;
+  max-width: var(--maxw);
+  margin-inline: auto;
+  padding-inline: clamp(1rem, 4vw, 2rem);
+}
+.section {
+  padding-block: clamp(3.5rem, 8vw, 6rem);
+}
+.section-tight {
+  padding-block: clamp(2.5rem, 5vw, 3.5rem);
+}
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--green);
+  font-weight: 600;
+  margin-bottom: 0.9rem;
+}
+.lede {
+  font-size: clamp(1.05rem, 2vw, 1.25rem);
+  color: var(--text-muted);
+  max-width: 60ch;
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--font-head);
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+  padding: 0.85rem 1.4rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease), background 0.15s var(--ease),
+    box-shadow 0.15s var(--ease), border-color 0.15s var(--ease);
+  will-change: transform;
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn-primary {
+  background: var(--green);
+  color: var(--green-ink);
+  box-shadow: 0 0 0 1px var(--green), 0 8px 24px -10px var(--green-glow);
+}
+.btn-primary:hover {
+  background: var(--green-bright);
+  color: var(--green-ink);
+  box-shadow: 0 0 0 1px var(--green-bright), 0 10px 30px -8px var(--green-glow);
+}
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.btn-secondary:hover {
+  color: var(--text);
+  border-color: var(--green);
+  background: var(--surface-2);
+}
+.btn-lg {
+  font-size: 1.1rem;
+  padding: 1rem 1.7rem;
+}
+
+/* ---------- Cards ---------- */
+.card {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg-elevated) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  transition: border-color 0.18s var(--ease), transform 0.18s var(--ease);
+}
+.card:hover {
+  border-color: var(--border-strong);
+}
+
+/* ---------- Stat chip (e.g. "SMASH 1.49") ---------- */
+.stat-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: rgba(22, 27, 34, 0.7);
+  color: var(--text-muted);
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+}
+.stat-chip b {
+  color: var(--green);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.stat-chip .label {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.68rem;
+}
+
+/* ---------- Pill / tag ---------- */
+.pill {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+/* ---------- Grid / dot-matrix backdrop (launch-monitor readout feel) ---- */
+.grid-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: radial-gradient(
+    rgba(61, 220, 132, 0.11) 1px,
+    transparent 1.4px
+  );
+  background-size: 26px 26px;
+  mask-image: radial-gradient(
+    ellipse 80% 70% at 50% 0%,
+    #000 0%,
+    transparent 78%
+  );
+  -webkit-mask-image: radial-gradient(
+    ellipse 80% 70% at 50% 0%,
+    #000 0%,
+    transparent 78%
+  );
+}
+
+/* ---------- Prose (blog) ---------- */
+.prose {
+  max-width: 70ch;
+  color: var(--text);
+  font-size: 1.08rem;
+  line-height: 1.75;
+}
+.prose > * + * {
+  margin-top: 1.15rem;
+}
+.prose h2 {
+  margin-top: 2.6rem;
+  font-size: clamp(1.5rem, 3vw, 2rem);
+}
+.prose h3 {
+  margin-top: 2rem;
+}
+.prose h2 + *,
+.prose h3 + * {
+  margin-top: 0.75rem;
+}
+.prose ul,
+.prose ol {
+  padding-left: 1.4rem;
+}
+.prose li + li {
+  margin-top: 0.4rem;
+}
+.prose a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--green-dim);
+}
+.prose a:hover {
+  text-decoration-color: var(--green);
+}
+.prose code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 0.1em 0.4em;
+  border-radius: 6px;
+}
+.prose pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1rem 1.15rem;
+  overflow-x: auto;
+}
+.prose pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+.prose blockquote {
+  border-left: 3px solid var(--green);
+  padding-left: 1.1rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.prose img {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.prose strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------- Utility ---------- */
+.text-muted {
+  color: var(--text-muted);
+}
+.center {
+  text-align: center;
+}
+.mx-auto {
+  margin-inline: auto;
+}
+.stack > * + * {
+  margin-top: 1rem;
+}

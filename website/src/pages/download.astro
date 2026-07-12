@@ -1,0 +1,363 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import JsonLd from "../components/JsonLd.astro";
+import {
+  LATEST_RELEASE_URL,
+  GITHUB_URL,
+  PRODUCT_NAME,
+  PRODUCT_OS,
+  PRODUCT_PRICE,
+  SITE_URL,
+} from "../consts";
+
+const title = "Download";
+const description = `Download ${PRODUCT_NAME} free for Windows. Auto-ingests GSPro data into 15 interactive dashboards. Local-first, private, no account required.`;
+
+const requirements = [
+  ["Operating system", "Windows 10 or 11, 64-bit"],
+  ["Simulator", "GSPro (any launch monitor that plays through GSPro)"],
+  ["Install rights", "Per-user install — no administrator rights needed"],
+  ["Disk", "~300 MB, plus your growing shot history in local Parquet"],
+  ["Account", "None. Nothing to sign up for."],
+];
+
+const faqs = [
+  {
+    q: "Is it really free?",
+    a: "Yes — completely free, with no account and no paid tier. Download it, install it, use every dashboard.",
+  },
+  {
+    q: "Does my data leave my machine?",
+    a: "No. Every shot is stored in local Parquet files right next to the app. Nothing is uploaded, and there's no server to send it to. Your data is yours.",
+  },
+  {
+    q: "Does it work with launch monitors other than GSPro?",
+    a: "It works with anything that plays through GSPro. The app reads GSPro's Practice Range exports and round files, so whatever monitor you use to drive GSPro — it just works.",
+  },
+  {
+    q: "Why does Windows show a warning when I run it?",
+    a: "The installer is unsigned, so Windows SmartScreen shows a caution on first run. That's expected for a small independent app. Click \"More info\", then \"Run anyway\". You can read exactly what to expect in the install steps above.",
+  },
+];
+
+// JSON-LD: SoftwareApplication
+const softwareLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: PRODUCT_NAME,
+  applicationCategory: "SportsApplication",
+  operatingSystem: "Windows 10, Windows 11",
+  softwareVersion: "latest",
+  downloadUrl: LATEST_RELEASE_URL,
+  url: `${SITE_URL}/download`,
+  description,
+  offers: {
+    "@type": "Offer",
+    price: PRODUCT_PRICE,
+    priceCurrency: "USD",
+  },
+  publisher: {
+    "@type": "Organization",
+    name: "OpenGolfLab",
+    url: SITE_URL,
+  },
+};
+---
+
+<BaseLayout title={title} description={description}>
+  <JsonLd slot="head" data={softwareLd} />
+
+  <section class="section-tight download-hero">
+    <div class="grid-bg"></div>
+    <div class="container dl-inner">
+      <p class="eyebrow">Free · Windows · No account</p>
+      <h1>Download {PRODUCT_NAME}</h1>
+      <p class="lede mx-auto" style="text-align:center;margin-top:1rem;">
+        Install it, play GSPro, and your analytics start filling in
+        automatically. Everything stays on your machine.
+      </p>
+
+      <div class="dl-btn-wrap">
+        <a href={LATEST_RELEASE_URL} class="btn btn-primary btn-lg" rel="noopener">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+            ><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            ></path></svg
+          >
+          Download for Windows
+        </a>
+        <p class="dl-sub">
+          Latest release on GitHub · {PRODUCT_OS}
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <div class="container dl-body">
+    <!-- System requirements -->
+    <section class="dl-section" aria-labelledby="req">
+      <h2 id="req">System requirements</h2>
+      <dl class="req-list">
+        {
+          requirements.map(([k, v]) => (
+            <div class="req-row">
+              <dt>{k}</dt>
+              <dd>{v}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </section>
+
+    <!-- Install steps -->
+    <section class="dl-section" aria-labelledby="install">
+      <h2 id="install">Installing</h2>
+      <ol class="install-steps">
+        <li class="card">
+          <span class="step-n tnum">01</span>
+          <div>
+            <h3>Download &amp; run the installer</h3>
+            <p class="text-muted">
+              Grab the latest <code>.exe</code> from the
+              <a href={LATEST_RELEASE_URL} rel="noopener">releases page</a> and
+              double-click it. It's a per-user install — no admin rights.
+            </p>
+          </div>
+        </li>
+        <li class="card smartscreen">
+          <span class="step-n tnum">02</span>
+          <div>
+            <h3>Get past the SmartScreen warning</h3>
+            <p class="text-muted">
+              The app is unsigned, so on first run Windows shows a blue
+              <strong>“Windows protected your PC”</strong> screen. This is
+              normal for small independent tools — it means the app hasn't paid
+              for a code-signing certificate, not that anything is wrong.
+            </p>
+            <div class="ss-do">
+              <span class="pill">More info</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                ><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                ></path></svg
+              >
+              <span class="pill pill-run">Run anyway</span>
+            </div>
+            <p class="text-muted ss-note">
+              Prefer to verify first? The full source is on
+              <a href={GITHUB_URL} rel="noopener">GitHub</a> — build it yourself
+              and skip the warning entirely.
+            </p>
+          </div>
+        </li>
+        <li class="card">
+          <span class="step-n tnum">03</span>
+          <div>
+            <h3>Play GSPro</h3>
+            <p class="text-muted">
+              Export from the Practice Range or start a round. The app detects
+              GSPro's files automatically and your dashboards populate — no
+              import step, ever.
+            </p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <!-- FAQ -->
+    <section class="dl-section" aria-labelledby="faq">
+      <h2 id="faq">FAQ</h2>
+      <div class="faq">
+        {
+          faqs.map((f) => (
+            <details class="faq-item">
+              <summary>
+                <span>{f.q}</span>
+                <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </summary>
+              <p set:html={f.a} />
+            </details>
+          ))
+        }
+      </div>
+    </section>
+  </div>
+</BaseLayout>
+
+<style>
+  .download-hero {
+    position: relative;
+    overflow: hidden;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    background: radial-gradient(
+      120% 90% at 50% -20%,
+      rgba(61, 220, 132, 0.09),
+      transparent 60%
+    );
+  }
+  .dl-inner {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-block: clamp(2.5rem, 6vw, 4rem);
+  }
+  .dl-btn-wrap {
+    margin-top: 1.8rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.7rem;
+  }
+  .dl-sub {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    letter-spacing: 0.02em;
+  }
+
+  .dl-body {
+    display: flex;
+    flex-direction: column;
+    gap: clamp(2.5rem, 6vw, 4rem);
+    padding-block: clamp(2.5rem, 6vw, 4rem);
+  }
+  .dl-section h2 {
+    margin-bottom: 1.4rem;
+  }
+
+  /* Requirements */
+  .req-list {
+    display: grid;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .req-row {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .req-row:last-child {
+    border-bottom: none;
+  }
+  .req-row dt {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    align-self: center;
+  }
+  .req-row dd {
+    margin: 0;
+    color: var(--text);
+  }
+
+  /* Install steps */
+  .install-steps {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .install-steps li {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 1.1rem;
+    align-items: start;
+  }
+  .install-steps h3 {
+    font-size: 1.15rem;
+  }
+  .install-steps p {
+    margin-top: 0.4rem;
+  }
+  .step-n {
+    font-family: var(--font-mono);
+    color: var(--green);
+    font-size: 1rem;
+    letter-spacing: 0.08em;
+    padding-top: 0.15rem;
+  }
+  .smartscreen {
+    border-color: var(--border-strong);
+    background: linear-gradient(180deg, rgba(61,220,132,0.05), var(--bg-elevated));
+  }
+  .ss-do {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.9rem;
+    color: var(--text-dim);
+  }
+  .pill-run {
+    color: var(--green);
+    border-color: var(--green-dim);
+  }
+  .ss-note {
+    margin-top: 0.9rem !important;
+    font-size: 0.92rem;
+  }
+
+  /* FAQ */
+  .faq {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+  .faq-item {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .faq-item summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    cursor: pointer;
+    font-family: var(--font-head);
+    font-weight: 600;
+    font-size: 1.02rem;
+    list-style: none;
+  }
+  .faq-item summary::-webkit-details-marker {
+    display: none;
+  }
+  .faq-item .chev {
+    flex: none;
+    color: var(--text-muted);
+    transition: transform 0.2s var(--ease);
+  }
+  .faq-item[open] .chev {
+    transform: rotate(180deg);
+  }
+  .faq-item p {
+    padding: 0 1.25rem 1.15rem;
+    color: var(--text-muted);
+    max-width: 68ch;
+  }
+
+  @media (max-width: 620px) {
+    .req-row {
+      grid-template-columns: 1fr;
+      gap: 0.25rem;
+    }
+    .install-steps li {
+      grid-template-columns: 1fr;
+      gap: 0.5rem;
+    }
+  }
+</style>
