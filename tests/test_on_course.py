@@ -148,6 +148,35 @@ def test_round_summary_excludes_incomplete_holes_and_counts_buckets():
     assert row["longest_drive"] == 280
 
 
+def test_hole_summary_counts_gimme_hole_when_a_later_hole_follows():
+    # A conceded putt: GSPro picks up the ball a few feet out, so the last
+    # record on the hole is ~2 yds from the pin (never <= HOLED_OUT_YDS) and no
+    # holing stroke at 0 is logged. Because a later hole was still played, the
+    # hole must count as completed rather than being dropped as abandoned.
+    df = pd.concat([
+        _hole("r1", 1, 4, [410, 150, 20, 2.0]),   # conceded ~6 ft, no 0 record
+        _hole("r1", 2, 4, [400, 8, 0]),            # next hole, holed out
+    ], ignore_index=True)
+    hs = on_course.hole_summary(df).set_index("hole")
+    assert bool(hs.loc[1, "holed"]) is True
+    # And it flows through to the round scorecard as a real, scored hole.
+    row = on_course.round_summary(df).iloc[0]
+    assert row["holes"] == 2
+
+
+def test_round_summary_still_drops_abandoned_final_hole():
+    # The safety net only rescues holes with a successor; a truly abandoned
+    # last hole (nothing played after it) is still excluded and marks the
+    # round as a DNF.
+    df = pd.concat([
+        _hole("r1", 1, 4, [410, 150, 20, 0]),
+        _hole("r1", 2, 4, [400, 72]),   # last hole, abandoned mid-play
+    ], ignore_index=True)
+    row = on_course.round_summary(df).iloc[0]
+    assert row["holes"] == 1
+    assert bool(row["finished"]) is False
+
+
 def test_round_summary_orders_rounds_by_date():
     late = _hole("late", 1, 4, [400, 8, 0])
     late["session_date"] = pd.Timestamp("2026-07-05")

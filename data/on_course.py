@@ -165,6 +165,15 @@ def hole_summary(df: pd.DataFrame) -> pd.DataFrame:
 
     out = pd.concat([strokes, par, holed], axis=1).reset_index()
     out["to_par"] = out["strokes"] - out["par"]
+    # A hole also counts as completed if a LATER hole in the same round was
+    # started — you can't tee off hole N+1 without having finished hole N. This
+    # rescues holes where GSPro logged no holing stroke at the pin: a conceded
+    # gimme (the sim picks up your ball inside the concede radius) leaves the
+    # last record a few feet out, so the distance-to-pin signal alone would miss
+    # it and wrongly drop the hole from the scorecard (an 18-hole round showing
+    # 17). Only the final hole of a round still relies on the holed-out distance.
+    session_max_hole = out.groupby("session_id")["hole"].transform("max")
+    out["holed"] = out["holed"] | (out["hole"] < session_max_hole)
     return out
 
 

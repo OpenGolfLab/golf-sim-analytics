@@ -202,6 +202,14 @@ class SimAnalyticsApp:
         # ground: readable on the projector, not oversized. Font *point* sizes
         # stay constant; only DPI moves.
         self.root.geometry("1450x955")
+        # Floor on the window size (in unscaled units — CustomTkinter multiplies
+        # these by the window scaling, so on a small laptop the real floor
+        # shrinks with the UI). Sized to still fit a ~10" 1366x768 panel while
+        # keeping the sidebar + at least one chart panel usable.
+        try:
+            self.root.minsize(1000, 640)
+        except tk.TclError:
+            pass
         self.chart_dpi = max(80, min(180, int(round(100 * (1 + (self.ui_scale - 1) * 0.5)))))
         self.plot_font_scale = 14
         # Open maximized (title bar + taskbar stay visible). F11 still toggles a
@@ -1097,9 +1105,9 @@ class SimAnalyticsApp:
             scale_row, settings_mod.UI_SCALE_OPTIONS, self.settings_ui_scale,
             on_change=self._apply_ui_scale_setting, accent=Colors.INFO, width=110,
         ).pack(side="right")
-        theme.body_label(card, "Sizes the whole app up or down. “Auto” matches your "
-                         "screen resolution — bump it up if things look too small on a "
-                         "projector or 4K display.", color=Colors.TEXT_MUTED,
+        theme.body_label(card, "Sizes the whole app up or down. “Auto” fits your "
+                         "display — smaller on a compact laptop, larger on a big monitor "
+                         "or TV. Pick a percentage to override it.", color=Colors.TEXT_MUTED,
                          font=theme.font("caption"), wraplength=300, justify="left").pack(
             anchor="w", pady=(6, 12))
 
@@ -1251,7 +1259,8 @@ class SimAnalyticsApp:
         creation, so existing panels have to be recreated)."""
         choice = self.settings_ui_scale.get()
         settings_mod.set("ui_scale", choice)
-        scale = settings_mod.resolve_scale(choice, self.root.winfo_screenheight())
+        height, diagonal_in, os_scaling = settings_mod.detect_display_metrics()
+        scale = settings_mod.resolve_scale(choice, height, diagonal_in, os_scaling)
         self.ui_scale = scale
         try:
             ctk.set_widget_scaling(scale)

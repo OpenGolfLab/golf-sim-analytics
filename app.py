@@ -32,30 +32,25 @@ def _set_windows_dpi_awareness() -> None:
             pass
 
 
-def _primary_screen_height() -> int:
-    """Physical primary-screen height in pixels. Call after DPI awareness is
-    set so Windows reports true pixels rather than a DPI-virtualized size.
-    Falls back to a 1080p baseline off-Windows or if the query fails."""
-    try:
-        return int(ctypes.windll.user32.GetSystemMetrics(1))  # SM_CYSCREEN
-    except Exception:
-        return 1080
-
-
 def _apply_ui_scaling() -> float:
-    """Resolve the display scale (a single, resolution-driven authority) and
+    """Resolve the display scale (a single, size/DPI-driven authority) and
     apply it to customtkinter, returning the factor so the app can scale its
     matplotlib charts to match.
 
+    The scale blends the display's OS DPI setting (readability baseline) with
+    its physical size (a gentle size preference) — see data.settings. Physical
+    metrics are read after DPI awareness is set so they're truthful.
+
     customtkinter's own automatic per-monitor DPI scaling is deactivated here
-    on purpose: leaving it on top of a resolution-derived factor double-counts
-    on high-DPI panels, and the whole point of task 1 is that the UI looks the
-    same on any display regardless of how Windows happens to report its DPI.
-    So this becomes the ONE thing that decides how big everything is.
+    on purpose: leaving it on top of our derived factor double-counts on
+    high-DPI panels. This becomes the ONE thing that decides how big everything
+    is, so the UI looks appropriately sized on any display.
     """
     from data import settings as settings_mod
 
-    scale = settings_mod.resolve_scale(settings_mod.get("ui_scale"), _primary_screen_height())
+    height, diagonal_in, os_scaling = settings_mod.detect_display_metrics()
+    scale = settings_mod.resolve_scale(
+        settings_mod.get("ui_scale"), height, diagonal_in, os_scaling)
     try:
         ctk.deactivate_automatic_dpi_awareness()
     except Exception:

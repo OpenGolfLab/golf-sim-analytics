@@ -39,6 +39,12 @@ _BUCKET_COLORS = {
 }
 _ACCENT = "#20E3B2"
 
+# Per-round score bars (bottom subplot): show at most this many recent rounds,
+# left-anchored, and reserve at least this many slots so a few rounds still
+# render as narrow bars rather than stretching across the whole panel.
+_MAX_ROUND_BARS = 10
+_MIN_ROUND_SLOTS = 6
+
 
 def render(fig, df, club_colors, font_scale, config, **extra):
     rounds = on_course.round_summary(df)
@@ -120,6 +126,11 @@ def _scoring_breakdown(ax, rounds, font_scale):
 
 
 def _round_scores(ax, rounds, font_scale):
+    # Show only the most recent rounds, and keep them anchored to the left so a
+    # constant-width bar is added on the right as each new round comes in (the
+    # axis doesn't stretch old bars wider). Newest rounds are the ones a golfer
+    # cares about; older ones stay in the KPI/breakdown totals above.
+    rounds = rounds.tail(_MAX_ROUND_BARS).reset_index(drop=True)
     n = len(rounds)
     x = range(n)
     to_par = rounds["to_par"].to_numpy()
@@ -127,7 +138,7 @@ def _round_scores(ax, rounds, font_scale):
     colors = [Colors.SUCCESS if v < 0 else (Colors.INFO if v == 0 else Colors.DANGER)
               for v in to_par]
     bars = ax.bar(x, to_par, color=colors, edgecolor="black", linewidth=0.5, zorder=3,
-                  width=0.6 if n > 1 else 0.3)
+                  width=0.62)
     ax.axhline(0, color=Colors.TEXT_MUTED, linewidth=1.0, zorder=2)
 
     finished = rounds["finished"] if "finished" in rounds.columns else pd.Series(True, index=rounds.index)
@@ -144,11 +155,14 @@ def _round_scores(ax, rounds, font_scale):
                 ha="center", va="bottom" if v >= 0 else "top",
                 color=color, fontsize=max(9, font_scale - 2), fontweight="bold")
 
+    # Course names crowd the tick labels once several rounds are shown, so
+    # only include the course when there's room (a handful of rounds).
+    show_course = "course" in rounds.columns and n <= 5
     labels = []
     for _, r in rounds.iterrows():
         d = r["date"]
         base = pd.to_datetime(d).strftime("%b %d") if pd.notna(d) else "—"
-        course = r.get("course") if "course" in rounds.columns else None
+        course = r.get("course") if show_course else None
         course_line = f"\n{course}" if course and course != "Unknown Course" else ""
         labels.append(f"{base}\n{int(r['holes'])}h{course_line}")
     ax.set_xticks(list(x))
@@ -157,4 +171,8 @@ def _round_scores(ax, rounds, font_scale):
     ax.set_title("Round Scores (vs par)", fontsize=font_scale, color=Colors.TEXT_PRIMARY, pad=6)
     ax.set_ylabel("Score to par", fontsize=max(10, font_scale - 1))
     style_axes(ax, font_scale - 1, grid="y")
-    ax.margins(x=0.05)
+    # Left-anchor the bars at a constant width: fix the x-range to a minimum
+    # number of slots so a couple of rounds render as narrow bars on the left
+    # (not stretched across the panel) with room to grow rightward up to the
+    # last-10 cap.
+    ax.set_xlim(-0.7, max(n, _MIN_ROUND_SLOTS) - 0.3)
