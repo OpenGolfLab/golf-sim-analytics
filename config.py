@@ -14,6 +14,11 @@ from collections import namedtuple
 from pathlib import Path
 
 
+# App version — bump this each release. Stamped into OpenGolfLab contribution
+# bundles (see contribute.py) so shared data is traceable to a build.
+APP_VERSION = "1.0.0"
+
+
 # ---------------------------------------------------------------------------
 # Base paths
 # ---------------------------------------------------------------------------
