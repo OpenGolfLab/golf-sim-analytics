@@ -1,19 +1,21 @@
 """
-Golf Sim Analytics — OpenGolfLab contribution export.
+Golf Sim Analytics — OpenGolfLab contribution export / upload.
 
 Turns the app's shot history (a pandas DataFrame) into an anonymized,
-schema-compliant bundle (manifest.json + shots.csv) ready to submit to the
-opengolflab-data repo. See that repo's SCHEMA.md for the format.
+schema-compliant bundle and either:
+  * build_bundle(): writes it to a folder (manual submit), or
+  * send_bundle():  POSTs it to the OpenGolfLab intake Worker (automatic).
 
-Only mapped metric columns are written — names, file paths, timestamps and any
-other PII are dropped by construction. Contribution is opt-in: build_bundle()
-refuses to run without recorded consent.
+Only mapped metric columns are included — names, file paths, timestamps and any
+other PII are dropped by construction. Contribution is opt-in: both paths refuse
+without recorded consent.
 
 Reuses the app's own column-alias resolution (data.columns) so it maps correctly
 regardless of how the launch monitor spelled each field.
 """
 from __future__ import annotations
 import os, json, uuid, datetime
+import urllib.request, urllib.error
 import pandas as pd
 
 from data.columns import (
@@ -46,7 +48,6 @@ _FIELD_ALIASES = {
     "apex": HEIGHT_ALIASES,
     "descent_angle": DESCENT_ANGLE_ALIASES,
 }
-# final CSV column order (only those present get written)
 _NUMERIC_ORDER = [
     "ball_speed", "club_speed", "smash", "launch_angle", "start_dir",
     "back_spin", "spin_axis", "carry", "total", "offline", "apex", "descent_angle",
@@ -55,12 +56,9 @@ REQUIRED = ["ball_speed", "launch_angle", "back_spin", "carry"]  # + club
 
 
 # ---------------------------------------------------------------- consent / id
-def _p(app_dir, name):
-    return os.path.join(app_dir, name)
-
 def get_contributor_uuid(app_dir: str) -> str:
     """Random, persisted, non-identifying id used only to de-duplicate."""
-    path = _p(app_dir, ".contributor_id")
+    path = os.path.join(app_dir, ".contributor_id")
     if os.path.exists(path):
         return open(path).read().strip()
     u = str(uuid.uuid4())
@@ -69,10 +67,10 @@ def get_contributor_uuid(app_dir: str) -> str:
     return u
 
 def has_consent(app_dir: str) -> bool:
-    return os.path.exists(_p(app_dir, ".contribute_consent"))
+    return os.path.exists(os.path.join(app_dir, ".contribute_consent"))
 
 def record_consent(app_dir: str, accepted: bool) -> None:
-    path = _p(app_dir, ".contribute_consent")
+    path = os.path.join(app_dir, ".contribute_consent")
     if accepted:
         with open(path, "w") as f:
             json.dump({"policy_version": CONSENT_POLICY_VERSION,
@@ -81,17 +79,10 @@ def record_consent(app_dir: str, accepted: bool) -> None:
         os.remove(path)
 
 
-# ----------------------------------------------------------------- the export
-def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
-                 handicap_band: str = "unknown", launch_monitor: str = "",
-                 app_version: str = "", round_dp: int = 1) -> str:
-    """
-    Write an anonymized bundle folder to ``out_root`` and return its path.
-
-    df          : the app's full shot history (any of the aliased column names).
-    out_root    : where to create the bundle folder (e.g. a chosen export dir).
-    app_dir     : the app's data dir, for the persisted uuid + consent marker.
-    """
+# ------------------------------------------------------- build the clean bundle
+def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monitor: str,
+             app_version: str, round_dp: int):
+    """Return (manifest_dict, clean_shots_dataframe). Requires consent."""
     if not has_consent(app_dir):
         raise PermissionError("Contribution is opt-in — call record_consent(app_dir, True) first.")
 
@@ -104,8 +95,7 @@ def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
     for field in _NUMERIC_ORDER:
         src = find_col(df, _FIELD_ALIASES[field])
         if src is not None:
-            vals = pd.to_numeric(df[src], errors="coerce")
-            out[field] = vals.round(round_dp)
+            out[field] = pd.to_numeric(df[src], errors="coerce").round(round_dp)
 
     bm = find_col(df, BALL_MODEL_ALIASES)
     if bm is not None:
@@ -114,29 +104,59 @@ def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
     if sq is not None:
         out["shot_quality"] = pd.to_numeric(df[sq], errors="coerce").round().astype("Int64")
 
-    # drop rows missing any required metric, and blank clubs
     req_present = [c for c in REQUIRED if c in out.columns]
     out = out.dropna(subset=req_present)
     out = out[out["club"].str.len() > 0].reset_index(drop=True)
     if out.empty:
         raise ValueError("No shots with the required metrics (club, ball_speed, launch_angle, back_spin, carry).")
 
-    contributor_uuid = get_contributor_uuid(app_dir)
-    date = datetime.date.today().isoformat()
-    bundle_dir = os.path.join(out_root, f"{contributor_uuid[:8]}_{date}")
-    os.makedirs(bundle_dir, exist_ok=True)
-
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "app": {"name": "GolfSimAnalytics", "version": app_version},
-        "contributor_uuid": contributor_uuid,
-        "created_date": date,
+        "contributor_uuid": get_contributor_uuid(app_dir),
+        "created_date": datetime.date.today().isoformat(),
         "consent": {"policy_version": CONSENT_POLICY_VERSION, "accepted": True},
         "environment": {"platform": "GSPro", "launch_monitor": launch_monitor},
         "self_report": {"handicap_band": handicap_band if handicap_band in HANDICAP_BANDS else "unknown"},
         "shot_count": int(len(out)),
     }
+    return manifest, out
+
+
+def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
+                 handicap_band: str = "unknown", launch_monitor: str = "",
+                 app_version: str = "", round_dp: int = 1) -> str:
+    """Write an anonymized bundle folder to ``out_root`` and return its path."""
+    manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
+                             launch_monitor=launch_monitor, app_version=app_version, round_dp=round_dp)
+    bundle_dir = os.path.join(out_root, f"{manifest['contributor_uuid'][:8]}_{manifest['created_date']}")
+    os.makedirs(bundle_dir, exist_ok=True)
     with open(os.path.join(bundle_dir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
     out.to_csv(os.path.join(bundle_dir, "shots.csv"), index=False)
     return bundle_dir
+
+
+def send_bundle(df: pd.DataFrame, *, app_dir: str, url: str, key: str | None = None,
+                handicap_band: str = "unknown", launch_monitor: str = "",
+                app_version: str = "", round_dp: int = 1, timeout: int = 30) -> dict:
+    """POST an anonymized bundle to the intake Worker. Returns the parsed reply
+    (with shot_count). Raises RuntimeError on a network/server problem."""
+    if not url or not url.startswith("https://"):
+        raise ValueError("Intake URL is not configured.")
+    manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
+                             launch_monitor=launch_monitor, app_version=app_version, round_dp=round_dp)
+    payload = json.dumps({"manifest": manifest, "shots_csv": out.to_csv(index=False)}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["X-OGL-Key"] = key
+    req = urllib.request.Request(url, data=payload, method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")
+        raise RuntimeError(f"Server rejected the upload ({e.code}): {detail[:200]}") from None
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Couldn't reach the server: {e.reason}") from None
+    return {"shot_count": manifest["shot_count"], **(data if isinstance(data, dict) else {})}

@@ -18,6 +18,13 @@ from pathlib import Path
 # bundles (see contribute.py) so shared data is traceable to a build.
 APP_VERSION = "1.0.0"
 
+# OpenGolfLab intake Worker. Paste your deployed Cloudflare Worker URL here to
+# enable one-click "Send to OpenGolfLab" in the Contribute dialog. Leave blank
+# and only local "Save a copy" is offered. APP_KEY is optional (set it if you
+# configured the matching Worker secret).
+OPENGOLFLAB_INTAKE_URL = "https://opengolflab-intake.etsmith1414.workers.dev"
+OPENGOLFLAB_INTAKE_KEY = ""
+
 
 # ---------------------------------------------------------------------------
 # Base paths

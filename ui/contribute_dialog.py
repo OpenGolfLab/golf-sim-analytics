@@ -127,18 +127,55 @@ def open_contribute_dialog(root):
             Colors.SUCCESS,
         )
 
+    def _send():
+        if not consent_var.get():
+            _set_status("Turn on the opt-in above to share.", Colors.WARNING)
+            return
+        url = getattr(config, "OPENGOLFLAB_INTAKE_URL", "")
+        if not url:
+            _set_status("Direct upload isn't set up in this build — use “Save a copy” instead.",
+                        Colors.WARNING)
+            return
+        try:
+            df = load_master_dataframe(config.DATA_DIR)
+        except Exception as exc:  # noqa: BLE001
+            _set_status(f"Couldn't read your shot history: {exc}", Colors.WARNING)
+            return
+        if df is None or df.empty:
+            _set_status("No shots recorded yet — play a session first.", Colors.WARNING)
+            return
+        _set_status("Sending to OpenGolfLab…", Colors.TEXT_MUTED)
+        win.update_idletasks()
+        try:
+            res = contribute.send_bundle(
+                df, app_dir=app_dir, url=url,
+                key=getattr(config, "OPENGOLFLAB_INTAKE_KEY", "") or None,
+                handicap_band=band_var.get(),
+                app_version=getattr(config, "APP_VERSION", ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _set_status(f"Upload failed: {exc}", Colors.WARNING)
+            return
+        n = res.get("shot_count", "your")
+        _set_status(f"Sent {n} shots to OpenGolfLab — thank you for contributing!", Colors.SUCCESS)
+
     btns = ctk.CTkFrame(card, fg_color="transparent")
     btns.pack(fill="x", pady=(4, 0))
 
-    export_btn = theme.outline_button(btns, accent=Colors.SUCCESS, text="Export bundle",
-                                      command=_export, width=140)
-    export_btn.pack(side="right", padx=(6, 0))
+    send_btn = theme.outline_button(btns, accent=Colors.SUCCESS, text="Send to OpenGolfLab",
+                                    command=_send, width=180)
+    send_btn.pack(side="right", padx=(6, 0))
+    save_btn = theme.outline_button(btns, accent=Colors.INFO, text="Save a copy…",
+                                    command=_export, width=120)
+    save_btn.pack(side="right", padx=(6, 0))
     theme.outline_button(btns, accent=Colors.TEXT_MUTED, text="Close",
-                         command=win.destroy, width=100).pack(side="right")
+                         command=win.destroy, width=90).pack(side="right")
 
     def _refresh_button():
-        # Subtle affordance: dim the export button until consent is on.
-        export_btn.configure(state="normal" if consent_var.get() else "disabled")
+        # Dim the action buttons until consent is on.
+        state = "normal" if consent_var.get() else "disabled"
+        send_btn.configure(state=state)
+        save_btn.configure(state=state)
 
     _refresh_button()
     win.after(120, lambda: (win.winfo_exists() and (win.lift(), win.focus_force())))
