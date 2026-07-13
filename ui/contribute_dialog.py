@@ -108,21 +108,21 @@ def open_contribute_dialog(root):
             _set_status("No shots recorded yet — play a session first.", Colors.WARNING)
             return
         out_root = filedialog.askdirectory(
-            parent=win, title="Choose where to save your contribution bundle",
+            parent=win, title="Choose where to save your contribution file",
         )
         if not out_root:
             return
         try:
-            path = contribute.build_bundle(
+            path = contribute.build_zip(
                 df, out_root, app_dir=app_dir,
                 handicap_band=band_var.get(),
                 app_version=getattr(config, "APP_VERSION", ""),
             )
         except Exception as exc:  # noqa: BLE001
-            _set_status(f"Couldn't export: {exc}", Colors.WARNING)
+            _set_status(f"Couldn't save: {exc}", Colors.WARNING)
             return
         _set_status(
-            f"Saved to:\n{path}\n\nEmail or upload that folder to submit it. "
+            f"Saved:\n{path}\n\nEmail or upload that .zip to submit it. "
             "Thank you for contributing!",
             Colors.SUCCESS,
         )

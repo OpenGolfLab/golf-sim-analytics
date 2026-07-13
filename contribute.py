@@ -14,7 +14,7 @@ Reuses the app's own column-alias resolution (data.columns) so it maps correctly
 regardless of how the launch monitor spelled each field.
 """
 from __future__ import annotations
-import os, json, uuid, datetime
+import os, json, uuid, datetime, zipfile
 import urllib.request, urllib.error
 import pandas as pd
 
@@ -137,6 +137,20 @@ def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
     return bundle_dir
 
 
+def build_zip(df: pd.DataFrame, out_root: str, *, app_dir: str,
+              handicap_band: str = "unknown", launch_monitor: str = "",
+              app_version: str = "", round_dp: int = 1) -> str:
+    """Write a single self-contained .zip bundle into out_root; return its path."""
+    manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
+                             launch_monitor=launch_monitor, app_version=app_version, round_dp=round_dp)
+    name = f"opengolflab_{manifest['contributor_uuid'][:8]}_{manifest['created_date']}.zip"
+    path = os.path.abspath(os.path.join(out_root, name))
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", json.dumps(manifest, indent=2))
+        z.writestr("shots.csv", out.to_csv(index=False))
+    return path
+
+
 def send_bundle(df: pd.DataFrame, *, app_dir: str, url: str, key: str | None = None,
                 handicap_band: str = "unknown", launch_monitor: str = "",
                 app_version: str = "", round_dp: int = 1, timeout: int = 30) -> dict:
@@ -147,7 +161,13 @@ def send_bundle(df: pd.DataFrame, *, app_dir: str, url: str, key: str | None = N
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
                              launch_monitor=launch_monitor, app_version=app_version, round_dp=round_dp)
     payload = json.dumps({"manifest": manifest, "shots_csv": out.to_csv(index=False)}).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        # A real user-agent — Cloudflare's bot filter (error 1010) blocks the
+        # default "Python-urllib/x" signature.
+        "User-Agent": f"GolfSimAnalytics/{app_version or '1.0'} (+https://opengolflab.com)",
+    }
     if key:
         headers["X-OGL-Key"] = key
     req = urllib.request.Request(url, data=payload, method="POST", headers=headers)
