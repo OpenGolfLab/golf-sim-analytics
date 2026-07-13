@@ -9,7 +9,8 @@ Three panels:
   * Scorecard KPIs — rounds/holes played, birdies & eagles, longest drive,
     best round.
   * Scoring breakdown — how every completed hole shook out (eagle → double+).
-  * Round scores — each round's score to par over time.
+  * Full round scores — each completed 18-hole round's score to par over time
+    (partial rounds are excluded here; they still count in the totals above).
 
 Only completed (holed-out) holes count toward scoring; a last hole abandoned
 when the round ended is ignored rather than logged as an unrealistic score.
@@ -126,6 +127,18 @@ def _scoring_breakdown(ax, rounds, font_scale):
 
 
 def _round_scores(ax, rounds, font_scale):
+    # This bottom panel is "full rounds only": a to-par bar is only a fair,
+    # comparable score when all 18 holes were played, so drop any partial
+    # round here (they still count in the KPI/breakdown totals above).
+    rounds = rounds[rounds["holes"] >= 18]
+    if rounds.empty:
+        ax.set_axis_off()
+        ax.text(0.5, 0.5, "No full 18-hole rounds yet",
+                ha="center", va="center", color=Colors.TEXT_MUTED,
+                fontsize=max(10, font_scale - 1), transform=ax.transAxes)
+        ax.set_title("Full Round Scores (vs par)", fontsize=font_scale,
+                     color=Colors.TEXT_PRIMARY, pad=6)
+        return
     # Show only the most recent rounds, and keep them anchored to the left so a
     # constant-width bar is added on the right as each new round comes in (the
     # axis doesn't stretch old bars wider). Newest rounds are the ones a golfer
@@ -168,7 +181,7 @@ def _round_scores(ax, rounds, font_scale):
     ax.set_xticks(list(x))
     ax.set_xticklabels(labels, fontsize=max(9, font_scale - 3))
     ax.set_ylim(min(to_par.min() - span * 0.25, -1), max(to_par.max() + span * 0.25, 1))
-    ax.set_title("Round Scores (vs par)", fontsize=font_scale, color=Colors.TEXT_PRIMARY, pad=6)
+    ax.set_title("Full Round Scores (vs par)", fontsize=font_scale, color=Colors.TEXT_PRIMARY, pad=6)
     ax.set_ylabel("Score to par", fontsize=max(10, font_scale - 1))
     style_axes(ax, font_scale - 1, grid="y")
     # Left-anchor the bars at a constant width: fix the x-range to a minimum

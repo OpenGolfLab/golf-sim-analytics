@@ -22,7 +22,7 @@ itself, not something this ingestion code can work around:
 
 - No club speed or smash factor anywhere in currentRound.dat, so those
   columns are always NaN for live-tracked shots — the Swing Efficiency
-  and Carry Efficiency dashboards simply won't have live-tracked points.
+  dashboard simply won't have live-tracked points.
 - ClubIndex is a raw internal number, not a name (see config.py's note on
   CLUB_INDEX_MAP for why, and how the mapping self-heals later).
 """

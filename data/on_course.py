@@ -1,30 +1,16 @@
 """
-On-course round handling: keeping course play separate from practice data,
-and detecting mulligans (re-hit shots).
+On-course round handling: keeping course play separate from practice data.
 
-Two distinct concerns the app cares about (see data/settings.py toggles):
+``exclude_on_course_from_practice`` (see data/settings.py): on-course rounds
+are full of shots that would pollute the "pure your swing" practice dashboards
+— chips, punch-outs, layups, recovery shots, half-swing pitches. round_type
+already tags every shot "practice" vs "on_course" (see live/shot_data.py), so
+splitting them is just a filter. ``practice_view`` / ``on_course_view`` are the
+two halves.
 
-- ``exclude_on_course_from_practice``: on-course rounds are full of shots
-  that would pollute the "pure your swing" practice dashboards — chips,
-  punch-outs, layups, recovery shots, half-swing pitches. round_type already
-  tags every shot "practice" vs "on_course" (see live/shot_data.py), so
-  splitting them is just a filter. ``practice_view`` / ``on_course_view``
-  are the two halves.
-
-- ``drop_mulligans``: a mulligan is a shot you re-hit from the same spot
-  because the first attempt was bad. GSPro's currentRound.dat has no explicit
-  "this was a mulligan / shot 2 from here" flag (the record only carries
-  Hole / HolePar / DistanceToPin / club / ball data — see the SAMPLE_SHOT in
-  tests), so this infers them from geometry: within one hole, if the very
-  next shot was hit from essentially the same distance-to-the-pin, the earlier
-  shot didn't advance the ball — it was re-hit. The re-hit (later) attempt is
-  kept; the earlier one(s) are the mulligans.
-
-  DistanceToPin is measured at each shot's *starting* position (a 74-yd wedge
-  in the sample sits 392 yds from a par-4 pin — i.e. where the ball lay, not
-  where it finished), which is exactly what makes "same start distance twice
-  in a row" a reliable re-hit signal. The last shot on a hole (the holed
-  putt / tap-in) has no successor on that hole, so it's never mis-flagged.
+Mulligans (re-hit shots) are intentionally NOT filtered here: GSPro already
+handles re-hits on its own scorecard, so stripping them again would
+double-count the correction.
 """
 from __future__ import annotations
 
@@ -45,18 +31,6 @@ HOLED_OUT_YDS = 1.0
 # Scorecard buckets, best → worst, by strokes relative to par.
 SCORE_BUCKETS = ["Eagle+", "Birdie", "Par", "Bogey", "Double+"]
 
-# Two consecutive shots on one hole whose starting distance-to-pin differs by
-# no more than this (yards) count as "the same spot" — i.e. a re-hit/mulligan.
-# Small on purpose: a genuine advancing shot moves the ball much farther than
-# this, so real play is never swept up, only near-stationary re-hits.
-MULLIGAN_TOLERANCE_YDS = 6.0
-
-
-def _round_type_mask(df: pd.DataFrame) -> pd.Series:
-    if "round_type" in df.columns:
-        return df["round_type"].astype(str) == ON_COURSE
-    return pd.Series(True, index=df.index)
-
 
 def practice_view(df: pd.DataFrame, exclude_on_course: bool = True) -> pd.DataFrame:
     """The practice-analytics frame: everything, minus on-course rounds when
@@ -74,43 +48,13 @@ def on_course_view(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["round_type"].astype(str) == ON_COURSE]
 
 
-def flag_mulligans(df: pd.DataFrame, tolerance: float = MULLIGAN_TOLERANCE_YDS) -> pd.Series:
-    """Boolean Series (aligned to df.index) marking on-course mulligan shots —
-    the earlier attempt when a shot was re-hit from the same spot on the same
-    hole. Returns all-False when the columns needed to detect them are absent.
-    """
-    flags = pd.Series(False, index=df.index)
-    if df.empty or not {"session_id", "hole", "distancetopin"} <= set(df.columns):
-        return flags
-
-    sub = df[_round_type_mask(df)]
-    if sub.empty:
-        return flags
-
-    dist = pd.to_numeric(sub["distancetopin"], errors="coerce")
-    # Distance-to-pin of the *next* shot on the same session+hole, in row order
-    # (rows are stored chronologically). sort=False keeps that order intact.
-    next_dist = dist.groupby([sub["session_id"], sub["hole"]], sort=False).shift(-1)
-    # A shot is a mulligan if the next shot on the hole started ~the same
-    # distance out (the ball didn't move). NaN (last shot on the hole) -> False.
-    is_mulligan = (dist - next_dist).abs() <= tolerance
-    flags.loc[sub.index] = is_mulligan.fillna(False)
-    return flags
-
-
-def drop_mulligans(df: pd.DataFrame, tolerance: float = MULLIGAN_TOLERANCE_YDS) -> pd.DataFrame:
-    """Return df without on-course mulligan (re-hit) shots."""
-    if df.empty:
-        return df
-    return df[~flag_mulligans(df, tolerance)]
-
-
 # ---------------------------------------------------------------------------
 # Scoring — turn the shot stream into per-hole and per-round scorecards.
 #
 # There's no explicit stroke count in the data, so strokes-per-hole is the
-# number of shots logged on that hole (GSPro logs every stroke, putts included;
-# drop mulligans first via drop_mulligans if you don't want re-hits counted).
+# number of shots logged on that hole (GSPro logs every stroke, putts included,
+# and already resolves re-hits on its own scorecard — see the module docstring
+# on why mulligans aren't filtered here).
 # ---------------------------------------------------------------------------
 _HOLE_COLS = {"session_id", "hole", "holepar"}
 

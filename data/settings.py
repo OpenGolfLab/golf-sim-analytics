@@ -5,9 +5,8 @@ Until now every Settings toggle (temperature normalization, ignore warm-up,
 demo mode) lived only in in-memory Tk variables and reset to its default on
 every launch. That's fine for throwaway view toggles, but some preferences
 really should stick between sessions — the display scale a user dials in for
-their projector, whether mulligans are dropped on-course, whether on-course
-rounds are kept out of the practice dashboards. This module is the single
-place that reads/writes those.
+their projector, whether on-course rounds are kept out of the practice
+dashboards. This module is the single place that reads/writes those.
 
 Design mirrors data/edits.py's sidecar pattern: a small JSON file, load()
 tolerates a missing/corrupt file by returning defaults, save() rewrites the
@@ -36,9 +35,6 @@ DEFAULTS: dict = {
     # 10" laptop to a wall TV — see auto_scale_for() below. Any explicit
     # percentage string ("100%", "125%", ...) overrides Auto.
     "ui_scale": "Auto",
-    # Drop mulligan (re-hit) shots from on-course rounds — see
-    # live/shot_data.py's mulligan detection.
-    "drop_mulligans": False,
     # Keep on-course rounds (which include chips, punches, recovery shots)
     # out of the practice-analytics dashboards so they don't taint the
     # "pure your swing" historical data. On by default: the whole point of

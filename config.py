@@ -364,6 +364,9 @@ CLUB_INDEX_MAP: dict[int, str] = {
     23: "Gw",
     24: "Sw",
     25: "Lw",  # lob wedge — confirmed from a live-tracked shot showing ClubIndex 25
+    26: "Lw",  # also the lob wedge — GSPro reports it under 26 on-course too
+               # (short-game shots ranging from tap-ins to ~115yd wedges),
+               # confirmed by the user against their on-course rounds
 }
 
 

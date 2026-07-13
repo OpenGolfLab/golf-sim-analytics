@@ -1,0 +1,71 @@
+Golf Sim Analytics — demo video narration
+============================================
+
+[01_title]
+Meet Golf Sim Analytics — the missing analytics layer for your golf simulator. It captures every shot you hit in GSPro, automatically, and turns your practice into insight.
+
+[02_home]
+The moment you open it, your landing page shows the state of your game: shots logged, sessions, and your personal records — longest drive, fastest club and ball speed, even your theoretical maximum drive — plus an average shot-quality score, trended across your recent sessions.
+
+[03_dispersion]
+Every dashboard is one click from the sidebar. Dispersion maps every shot you've ever hit — carry against offline, color-coded by club, with density heat maps that show your true pattern, not just your best shots.
+
+[04_dispersion_hover]
+Hover any point for the full story: carry, ball speed, launch, descent, spin, and smash factor — each one flagged against that club's ideal window.
+
+[05_trajectory]
+Trajectory draws your real flight paths against optimal launch, peak height, and landing-angle windows for every club in the bag — so you can see at a glance whether you're flighting it the way you should.
+
+[06_gapping_benchmarks]
+Club Gapping exposes overlaps and holes in your set, with a target gap for every club. And with one click you can overlay real benchmarks — PGA Tour averages, or any handicap level — to see exactly where you stand.
+
+[07_efficiency]
+Swing Efficiency plots ball speed against club speed with smash-factor reference lines — how well you turn swing speed into distance.
+
+[08_launch_spin]
+Launch and Spin Optimization scores every shot against an ideal window scaled to your own swing speed. Green means you're in the money zone.
+
+[09_iron_stopping]
+Iron Stopping Power shows how high your irons fly and how steeply they land — in other words, whether they'll actually hold a green.
+
+[10_carry_efficiency]
+Carry Efficiency tracks how much distance you extract from every mile per hour of ball speed, club by club.
+
+[11_shot_shape]
+Shot Shape reveals your draw or fade bias from start line and curve — your real shot pattern, quantified.
+
+[12_shot_quality]
+Every shot earns a zero-to-one-hundred quality score, blending consistency against your own history with tour-reference targets — and it's trended session over session, so you know if you're actually improving.
+
+[13_timeline]
+Shot and Club Trends stacks your entire practice history by day and by club — your practice diet, at a glance.
+
+[14_session_compare]
+Session Comparison puts up to four sessions side by side for any club, with a full head-to-head metric table.
+
+[15_club_compare]
+Testing shafts or adapter settings? Club Comparison is a built-in fitting bay. Define each configuration, and get head-to-head dispersion and averages — carry, ball speed, spin, smash — hard data instead of feel.
+
+[16_speed_training]
+Speed Training is a dedicated driver-speed program: your cruising speed, your fatigue curve within a session, speed versus strike quality, and your long-term progression.
+
+[17_two_up]
+Run any two dashboards side by side —
+
+[18_filters]
+— and shape all of them at once with global filters: time range, any subset of clubs, quality cuts like dropping your worst ten percent — even temperature normalization, so a cold January session compares fairly to July.
+
+[19_live]
+Then hit Go Live. As you play, shots land on the chart in real time over your faded history, while gauges track your club speed against your personal best and the quality of your last strike. New records flash the moment you set them.
+
+[20_settings]
+Everything tunes to your setup in Settings: display scaling for projectors, warm-up shot handling, demo datasets for a test drive, and how on-course rounds are kept separate from pure practice data.
+
+[21_manage_sessions]
+Your data stays yours — and every edit is reversible. Hide a session, reassign a mis-clubbed shot, and bring anything back later.
+
+[22_on_course]
+And when you play a round, On-Course Play scores it automatically: holes, birdies, scoring breakdown, longest drives — straight from the simulator, no manual entry.
+
+[23_outro]
+Golf Sim Analytics. Every shot. Every insight. Master your game.

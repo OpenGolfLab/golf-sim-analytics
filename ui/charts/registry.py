@@ -15,12 +15,10 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ui.charts import (
-    carry_efficiency,
     club_compare,
     dispersion,
     efficiency,
     gapping,
-    iron_stopping,
     launch_spin,
     live_dispersion,
     on_course_dashboard,
@@ -70,9 +68,6 @@ _DESCRIPTIONS = {
                         "— how well you transfer speed to the ball.",
     "Launch & Spin Optimization": "Launch angle vs spin for one club against its "
                                   "speed-scaled optimal window.",
-    "Iron Stopping Power": "Descent angle and peak height — how steeply iron shots "
-                           "land and hold greens.",
-    "Carry Efficiency": "Carry distance relative to ball speed, per club.",
     "Shot Shape": "Start direction vs curve — your draw/fade shape bias.",
     "Shot Quality": "A 0-100 quality score per shot, averaged per session and "
                     "trended over time.",
@@ -111,8 +106,6 @@ DASHBOARDS: list[DashboardDef] = [
         gapping,
         efficiency,
         launch_spin,
-        iron_stopping,
-        carry_efficiency,
         shot_quality,
         session_compare,
         club_compare,

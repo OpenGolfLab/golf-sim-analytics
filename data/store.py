@@ -60,8 +60,8 @@ def load_master_dataframe(data_dir: Path) -> pd.DataFrame:
     # speed at all (GSPro's currentRound.dat doesn't expose it), so
     # requiring it here would silently drop every live-tracked shot from
     # the whole app the moment any CSV-sourced file in the mix has a
-    # clubspeed column. Individual charts that need club speed (Swing
-    # Efficiency, Carry Efficiency) already skip rows missing it on their
+    # clubspeed column. Individual charts that need club speed (e.g. Swing
+    # Efficiency) already skip rows missing it on their
     # own — that per-chart handling is the right place for this, not a
     # blanket drop here.
     carry_col = find_col(df, CARRY_ALIASES)

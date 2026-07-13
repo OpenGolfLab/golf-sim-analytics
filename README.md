@@ -18,7 +18,7 @@
 | Category | Dashboards |
 |---|---|
 | Metrics | Dispersion · Trajectory · Club Gapping · Swing Efficiency · Shot Quality · Shot & Club Trends |
-| Optimization | Launch & Spin · Iron Stopping Power · Carry Efficiency · Session Comparison · Shot Shape |
+| Optimization | Launch & Spin · Session Comparison · Shot Shape |
 | Club Fitting | Club Comparison (adapter A/B testing with live capture) |
 | Speed Training | Cruising speed, fatigue curve, speed vs. strike quality, long-term progression |
 | On-Course | Automatic scorecards — holes, birdies, scoring breakdown, longest drives |
@@ -95,4 +95,4 @@ tests/            pytest suite
 ## Notes
 
 - Windows-only: the UI uses per-monitor DPI awareness, dark title-bar theming, and watches GSPro's per-user data folder — all Windows-specific.
-- Temperature normalization, warm-up shot filtering, mulligan handling, and on-course/practice separation are all opt-in via **⚙ Settings**.
+- Temperature normalization, warm-up shot filtering, and on-course/practice separation are all opt-in via **⚙ Settings**.

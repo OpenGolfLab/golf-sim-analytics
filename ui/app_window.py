@@ -118,8 +118,6 @@ class SimAnalyticsApp:
         self._settings = settings_mod.load()
         self.settings_ui_scale = tk.StringVar(value=self._settings.get("ui_scale", "Auto"))
         # On-course play handling (persisted).
-        self.settings_drop_mulligans = tk.BooleanVar(
-            value=self._settings.get("drop_mulligans", False))
         self.settings_exclude_on_course = tk.BooleanVar(
             value=self._settings.get("exclude_on_course_from_practice", True))
 
@@ -449,6 +447,11 @@ class SimAnalyticsApp:
         else:
             self.go_live_button.configure(text="Go Live", fg_color="transparent", text_color=Colors.ACCENT)
 
+    def _open_contribute(self):
+        """Open the OpenGolfLab contribution (opt-in data sharing) dialog."""
+        from ui.contribute_dialog import open_contribute_dialog
+        open_contribute_dialog(self.root)
+
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
@@ -460,6 +463,12 @@ class SimAnalyticsApp:
             top_bar, accent=Colors.ACCENT, text="Go Live", command=self.toggle_live,
         )
         self.go_live_button.pack(side=tk.LEFT, padx=(15, 6), pady=12)
+
+        self.contribute_button = theme.outline_button(
+            top_bar, accent=Colors.SUCCESS, text="Contribute Data",
+            command=self._open_contribute,
+        )
+        self.contribute_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
 
         self.settings_button = theme.outline_button(
             top_bar, accent=Colors.ACCENT, text="⚙ Settings", command=self._open_settings,
@@ -851,10 +860,6 @@ class SimAnalyticsApp:
         # and apply club overrides (data/edits.py — Parquet never touched).
         full = edits_mod.add_shot_uid(full)
         full = edits_mod.apply_edits(full, edits_mod.load_edits(data_dir))
-        # Drop on-course mulligans (re-hit shots) when enabled — touches only
-        # on_course rounds; practice range data is never affected.
-        if self.settings_drop_mulligans.get():
-            full = on_course.drop_mulligans(full)
         self._full_df = full
         # Practice-analytics view every dashboard reads: on-course rounds (chips,
         # punches, recoveries) filtered out when enabled so they don't taint the
@@ -1183,19 +1188,6 @@ class SimAnalyticsApp:
                          color=Colors.TEXT_MUTED, font=theme.font("caption"),
                          wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
 
-        row5 = ctk.CTkFrame(card, fg_color="transparent")
-        row5.pack(fill="x")
-        theme.body_label(row5, "Drop mulligans (re-hit shots)",
-                         color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
-        theme.toggle_switch(
-            row5, accent=Colors.WARNING, text="", variable=self.settings_drop_mulligans,
-            command=self._apply_on_course_settings, onvalue=True, offvalue=False,
-        ).pack(side="right")
-        theme.body_label(card, "Removes a shot when the next shot on the same hole was hit "
-                         "from the same spot — i.e. you re-teed after a bad one. The re-hit "
-                         "is kept.", color=Colors.TEXT_MUTED, font=theme.font("caption"),
-                         wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
-
         theme.outline_button(card, accent=Colors.INFO, text="Manage sessions…",
                              command=lambda: (win.destroy(), self._open_manage_sessions()),
                              width=170).pack(anchor="w", pady=(0, 12))
@@ -1243,9 +1235,8 @@ class SimAnalyticsApp:
                    tone="info")
 
     def _apply_on_course_settings(self):
-        """Persist the on-course toggles and reload so the practice dashboards
-        pick up the new mulligan / exclude-on-course filtering."""
-        settings_mod.set("drop_mulligans", self.settings_drop_mulligans.get())
+        """Persist the on-course toggle and reload so the practice dashboards
+        pick up the new exclude-on-course filtering."""
         settings_mod.set("exclude_on_course_from_practice",
                          self.settings_exclude_on_course.get())
         self.load_master_data()

@@ -64,10 +64,17 @@ def test_ingest_csv_to_parquet_returns_none_on_bad_file(tmp_path):
     assert result is None or hasattr(result, "empty")
 
 
-def test_extract_date_rejects_future_dates():
-    # A mistyped filename segment ("08-06-30" -> year 2030) must not produce
-    # a future session_date that pins itself atop every Last-N filter.
-    assert extract_date_from_filename("gspro-export08-06-30-19-12-00") is None
+def test_extract_date_repairs_future_year_to_recent_past():
+    # A future year in the filename is almost always a mistyped year segment
+    # ("08-06-30" -> 2030). Rather than discard the date, treat it as this
+    # year — or the most recent past year if that month/day hasn't come
+    # around yet — so the round keeps a real, sortable, non-future date.
+    parsed = extract_date_from_filename("gspro-export08-06-30-19-12-00")
+    assert parsed is not None
+    now = pd.Timestamp.now()
+    assert parsed <= now + pd.Timedelta(days=1)   # never future
+    assert parsed.year in (now.year, now.year - 1)
+    assert (parsed.month, parsed.day) == (8, 6)   # month/day preserved
 
 
 def test_parse_and_clean_csv_drops_rows_with_missing_club(tmp_path):

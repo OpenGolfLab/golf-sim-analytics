@@ -45,56 +45,6 @@ def test_on_course_view_selects_only_course_rounds():
     assert (out["round_type"] == "on_course").all()
 
 
-def test_flag_mulligans_marks_the_re_hit_shot():
-    # Tee shot from 410, a mulligan re-teed from ~the same spot (409), then a
-    # good drive that advances to 150, then an approach to 8. The first shot
-    # (410, immediately followed by 409) is the mulligan.
-    df = _round([410, 409, 150, 8])
-    flags = on_course.flag_mulligans(df)
-    assert list(flags) == [True, False, False, False]
-
-
-def test_drop_mulligans_removes_only_the_re_hit():
-    df = _round([410, 409, 150, 8])
-    out = on_course.drop_mulligans(df)
-    assert list(out["distancetopin"]) == [409, 150, 8]
-
-
-def test_multiple_consecutive_mulligans():
-    df = _round([300, 301, 299, 120])  # three tries from ~300, then advance
-    flags = on_course.flag_mulligans(df)
-    assert list(flags) == [True, True, False, False]
-
-
-def test_holed_out_shot_is_never_a_mulligan():
-    # A short chip to 3 yds then a tap-in from 3: the last shot has no
-    # successor on the hole, so it can't be flagged; the 3-yd chip advanced
-    # from 30, so it isn't either.
-    df = _round([30, 3])
-    assert not on_course.flag_mulligans(df).any()
-
-
-def test_mulligans_are_scoped_per_hole():
-    # Same distance across a hole boundary must NOT count as a re-hit.
-    df = pd.concat([
-        _round([120], hole=1),
-        _round([120], hole=2),
-    ], ignore_index=True)
-    assert not on_course.flag_mulligans(df).any()
-
-
-def test_practice_shots_are_ignored_by_mulligan_detection():
-    # Range balls hit repeatedly from the same mat (hole 0, constant distance)
-    # must not be treated as mulligans.
-    df = _round([250, 250, 250], hole=0, round_type="practice")
-    assert not on_course.flag_mulligans(df).any()
-
-
-def test_flag_mulligans_safe_without_required_columns():
-    df = pd.DataFrame({"club": ["Dr", "7I"], "carry": [250, 170]})
-    assert not on_course.flag_mulligans(df).any()
-
-
 # --- scoring -----------------------------------------------------------------
 
 def _hole(session, hole, par, distances, clubs=None):
