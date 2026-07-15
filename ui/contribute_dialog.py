@@ -84,7 +84,18 @@ def open_contribute_dialog(root):
     # ---- optional handicap band ----
     theme.section_label(card, "Your handicap (optional)", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
     band_var = tk.StringVar(value="unknown")
-    theme.dropdown(card, list(contribute.HANDICAP_BANDS), band_var, width=200).pack(anchor="w", pady=(0, 12))
+    theme.dropdown(card, list(contribute.HANDICAP_BANDS), band_var, width=200).pack(anchor="w", pady=(0, 10))
+
+    # ---- optional launch monitor (drives the data-quality tier) ----
+    theme.section_label(card, "Your launch monitor (optional)", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
+    monitor_var = tk.StringVar(value="")
+    theme.dropdown(card, list(contribute.LAUNCH_MONITORS), monitor_var, width=200).pack(anchor="w", pady=(0, 2))
+    theme.body_label(
+        card, "Tells us how your spin was captured (measured vs. modeled), so "
+        "high-accuracy sessions can be weighted appropriately. Optional.",
+        color=Colors.TEXT_MUTED, font=theme.font("caption"),
+        wraplength=460, justify="left", anchor="w",
+    ).pack(anchor="w", pady=(0, 12))
 
     # ---- status line ----
     status = theme.body_label(card, "", color=Colors.TEXT_MUTED, font=theme.font("caption"),
@@ -116,6 +127,7 @@ def open_contribute_dialog(root):
             path = contribute.build_zip(
                 df, out_root, app_dir=app_dir,
                 handicap_band=band_var.get(),
+                launch_monitor=monitor_var.get(),
                 app_version=getattr(config, "APP_VERSION", ""),
             )
         except Exception as exc:  # noqa: BLE001
@@ -151,6 +163,7 @@ def open_contribute_dialog(root):
                 df, app_dir=app_dir, url=url,
                 key=getattr(config, "OPENGOLFLAB_INTAKE_KEY", "") or None,
                 handicap_band=band_var.get(),
+                launch_monitor=monitor_var.get(),
                 app_version=getattr(config, "APP_VERSION", ""),
             )
         except Exception as exc:  # noqa: BLE001

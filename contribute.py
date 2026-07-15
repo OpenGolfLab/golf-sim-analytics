@@ -24,9 +24,54 @@ from data.columns import (
     DESCENT_ANGLE_ALIASES, SPIN_RATE_ALIASES, START_DIR_ALIASES, SPIN_AXIS_ALIASES,
 )
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"   # 1.1 = structured environment.instrument (see instrument_block)
 CONSENT_POLICY_VERSION = "1.0"
 HANDICAP_BANDS = ["scratch", "1-4", "5-9", "10-14", "15-19", "20-24", "25+", "unknown"]
+
+# ---------------------------------------------------------------------------
+# Launch-monitor / instrument metadata (manifest v1.1).
+#
+# `measures_spin` marks monitors that MEASURE spin directly (camera/photometric
+# or high-end radar) versus those that model/estimate it. It is DECLARED by the
+# user, so it's spoofable — on the aggregation side it only gates whether a
+# contribution can reach the "Verified" trust tier, never whether it's accepted.
+# Keep this list conservative; it's the maintained allowlist referenced by
+# opengolflab-data/AGGREGATION.md §1.
+# ---------------------------------------------------------------------------
+SPIN_MEASURING = {
+    "Trackman", "Foresight GCQuad", "Foresight GC3", "Foresight GCHawk",
+    "Bushnell Launch Pro", "Uneekor EYE XO", "Uneekor QED", "Uneekor EYE MINI",
+    "Full Swing KIT", "SkyTrak+", "Garmin Approach R50",
+}
+_MONITOR_KIND = {
+    "Trackman": "radar", "Full Swing KIT": "radar", "Garmin Approach R10": "radar",
+    "Mevo+": "radar", "FlightScope Mevo": "radar", "PRGR": "radar",
+    "Foresight GCQuad": "camera", "Foresight GC3": "camera",
+    "Foresight GCHawk": "camera", "Bushnell Launch Pro": "camera",
+    "Uneekor EYE XO": "camera", "Uneekor QED": "camera", "Uneekor EYE MINI": "camera",
+    "Garmin Approach R50": "photometric", "SkyTrak+": "photometric",
+    "SkyTrak": "photometric", "Rapsodo MLM2PRO": "photometric", "Square Golf": "photometric",
+}
+# Dropdown order for the contribute dialog: blank (undeclared) first, spin-measuring
+# units, then modeled-spin units, then a catch-all.
+LAUNCH_MONITORS = [
+    "", "Trackman", "Foresight GCQuad", "Foresight GC3", "Foresight GCHawk",
+    "Bushnell Launch Pro", "Uneekor EYE XO", "Uneekor QED", "Uneekor EYE MINI",
+    "Full Swing KIT", "SkyTrak+", "Garmin Approach R50",
+    "SkyTrak", "Garmin Approach R10", "Mevo+", "FlightScope Mevo",
+    "Rapsodo MLM2PRO", "Square Golf", "PRGR", "Other",
+]
+
+
+def instrument_block(model: str) -> dict:
+    """Structured environment.instrument for the v1.1 manifest. Unknown/blank
+    models resolve to kind 'unknown', measures_spin False (Community tier only)."""
+    model = (model or "").strip()
+    return {
+        "model": model,
+        "kind": _MONITOR_KIND.get(model, "unknown"),
+        "measures_spin": model in SPIN_MEASURING,
+    }
 
 CLUB_ALIASES = ["club", "clubname", "club_name"]
 BALL_MODEL_ALIASES = ["ball_model", "ballmodel", "ball"]
@@ -116,7 +161,7 @@ def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monit
         "contributor_uuid": get_contributor_uuid(app_dir),
         "created_date": datetime.date.today().isoformat(),
         "consent": {"policy_version": CONSENT_POLICY_VERSION, "accepted": True},
-        "environment": {"platform": "GSPro", "launch_monitor": launch_monitor},
+        "environment": {"platform": "GSPro", "instrument": instrument_block(launch_monitor)},
         "self_report": {"handicap_band": handicap_band if handicap_band in HANDICAP_BANDS else "unknown"},
         "shot_count": int(len(out)),
     }
