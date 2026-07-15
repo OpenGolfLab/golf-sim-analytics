@@ -460,10 +460,21 @@ class SimAnalyticsApp:
         top_bar = theme.sidebar_frame(self.root, height=64)
         top_bar.pack(side=tk.TOP, fill=tk.X)
 
+        # Collapse/expand the left dashboard menu to hand its width to the
+        # charts. The glyph is a hamburger (menu) affordance — functional, not
+        # decorative.
+        self._sidebar_visible = True
+        self.sidebar_toggle_btn = theme.outline_button(
+            top_bar, accent=Colors.TEXT_MUTED, text="☰", command=self._toggle_sidebar,
+            width=44,
+        )
+        self.sidebar_toggle_btn.pack(side=tk.LEFT, padx=(15, 6), pady=12)
+        attach_tooltip(self.sidebar_toggle_btn, "Hide or show the dashboard menu")
+
         self.go_live_button = theme.outline_button(
             top_bar, accent=Colors.ACCENT, text="Go Live", command=self.toggle_live,
         )
-        self.go_live_button.pack(side=tk.LEFT, padx=(15, 6), pady=12)
+        self.go_live_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
 
         self.contribute_button = theme.outline_button(
             top_bar, accent=Colors.SUCCESS, text="Contribute Data",
@@ -528,6 +539,7 @@ class SimAnalyticsApp:
         sidebar = theme.sidebar_frame(main_body, width=340)
         sidebar.pack(side=tk.LEFT, fill=tk.Y)
         sidebar.pack_propagate(False)
+        self.sidebar = sidebar
 
         self._build_sidebar_sections(sidebar)
 
@@ -536,6 +548,17 @@ class SimAnalyticsApp:
             side=tk.LEFT, fill=tk.BOTH, expand=True,
             padx=config.SPACING["sm"], pady=config.SPACING["sm"],
         )
+
+    def _toggle_sidebar(self):
+        """Hide/show the left dashboard menu so the chart area can use its
+        width. Re-packed before grid_frame so it returns to the left edge; the
+        active chart panels reflow via their own <Configure> handlers."""
+        if self._sidebar_visible:
+            self.sidebar.pack_forget()
+            self._sidebar_visible = False
+        else:
+            self.sidebar.pack(side=tk.LEFT, fill=tk.Y, before=self.grid_frame)
+            self._sidebar_visible = True
 
     def _build_sidebar_sections(self, sidebar):
         # Sections live in a scrollable container so the menu keeps working once
