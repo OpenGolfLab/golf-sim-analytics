@@ -36,12 +36,36 @@ QUALITY_FILTER_OPTIONS = [QUALITY_ALL, QUALITY_DROP_WORST_10, QUALITY_PEAK_10]
 
 WARMUP_SHOTS = 5
 
+# Warm-up handling modes — which "getting loose" shots to exclude from the
+# dashboards. These strings double as the Settings dropdown labels (same
+# convention as TIME_* / QUALITY_* above).
+WARMUP_OFF = "Keep all shots"
+WARMUP_SESSION = "First 5 of session"
+WARMUP_CLUB = "First of each club"
+WARMUP_MODE_OPTIONS = [WARMUP_OFF, WARMUP_SESSION, WARMUP_CLUB]
 
-def drop_warmup_shots(df: pd.DataFrame, n: int = WARMUP_SHOTS) -> pd.DataFrame:
-    """Drop the first ``n`` shots of each session (warm-up swings), by row order
-    within session_id. No-op when there's no session column."""
-    if df.empty or "session_id" not in df.columns:
+
+def drop_warmup_shots(
+    df: pd.DataFrame, mode: str = WARMUP_SESSION, n: int = WARMUP_SHOTS
+) -> pd.DataFrame:
+    """Drop warm-up ("getting loose") shots from each session, by row order.
+
+    ``mode``:
+      * ``WARMUP_OFF``     — keep everything (no-op).
+      * ``WARMUP_SESSION`` — drop the first ``n`` shots of each session.
+      * ``WARMUP_CLUB``    — drop the first shot of each club within a session,
+        so a mixed-club practice bag also sheds the reacquaint-with-a-new-club
+        swing, not just the session's opening shots.
+
+    No-op when the column a mode needs (``session_id``, or ``club`` for the
+    per-club mode) is missing.
+    """
+    if df.empty or mode == WARMUP_OFF or "session_id" not in df.columns:
         return df
+    if mode == WARMUP_CLUB:
+        if "club" not in df.columns:
+            return df
+        return df[df.groupby(["session_id", "club"]).cumcount() >= 1]
     return df[df.groupby("session_id").cumcount() >= n]
 
 

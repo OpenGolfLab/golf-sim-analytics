@@ -4,6 +4,7 @@ import pytest
 from data.filters import (
     filter_master_data, drop_warmup_shots, TIME_ALL, TIME_LAST_SESSION,
     CLUB_ALL, QUALITY_ALL, QUALITY_DROP_WORST_10,
+    WARMUP_OFF, WARMUP_SESSION, WARMUP_CLUB,
 )
 
 
@@ -21,6 +22,34 @@ def test_drop_warmup_shots_removes_first_n_per_session():
 def test_drop_warmup_shots_no_session_column_is_noop():
     df = pd.DataFrame({"carry": [1, 2, 3]})
     assert len(drop_warmup_shots(df)) == 3
+
+
+def test_drop_warmup_off_keeps_everything():
+    df = pd.DataFrame({
+        "session_id": ["a"] * 8,
+        "club": ["Dr"] * 8,
+        "carry": list(range(8)),
+    })
+    out = drop_warmup_shots(df, WARMUP_OFF)
+    assert len(out) == 8
+
+
+def test_drop_warmup_per_club_drops_first_of_each_club():
+    # Mixed bag within one session: Dr x3, then 7I x2, then back to Dr x2.
+    df = pd.DataFrame({
+        "session_id": ["s1"] * 7,
+        "club": ["Dr", "Dr", "Dr", "7I", "7I", "Dr", "Dr"],
+        "carry": [250, 240, 245, 150, 140, 248, 242],
+    })
+    out = drop_warmup_shots(df, WARMUP_CLUB)
+    # First Dr (250) and first 7I (150) dropped; the later Dr run is not a
+    # new club, so its shots stay.
+    assert out["carry"].tolist() == [240, 245, 140, 248, 242]
+
+
+def test_drop_warmup_per_club_needs_club_column():
+    df = pd.DataFrame({"session_id": ["a"] * 3, "carry": [1, 2, 3]})
+    assert len(drop_warmup_shots(df, WARMUP_CLUB)) == 3
 
 
 @pytest.fixture

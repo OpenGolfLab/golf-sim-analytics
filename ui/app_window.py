@@ -169,9 +169,10 @@ class SimAnalyticsApp:
         self.settings_temp_norm_enabled = tk.BooleanVar(value=False)
         self.global_temp_var = tk.StringVar(value="")
         self._normalizer = EnvironmentalNormalizer()
-        # Ignore each session's first few shots (warm-up swings) in the
-        # dashboards — a Settings toggle, off by default.
-        self.settings_ignore_warmup = tk.BooleanVar(value=False)
+        # Which warm-up ("getting loose") shots to drop from the dashboards —
+        # a Settings dropdown (off / first 5 of session / first of each club),
+        # off by default. See data/filters.drop_warmup_shots.
+        self.settings_warmup_mode = tk.StringVar(value=filters_mod.WARMUP_OFF)
         # Demo mode: show a generated sample dataset instead of real data.
         # Which dataset is chosen from config.SAMPLE_DATASETS via a Settings
         # dropdown; both vars are in-memory-only by design (demo state
@@ -775,8 +776,9 @@ class SimAnalyticsApp:
         return self._normalizer.normalize(df, temp) if temp is not None else df
 
     def _drop_warmup(self, df):
-        """Strip each session's warm-up shots when the Settings toggle is on."""
-        return filters_mod.drop_warmup_shots(df) if self.settings_ignore_warmup.get() else df
+        """Strip warm-up shots per the Settings warm-up mode (a no-op when the
+        mode is 'Keep all shots')."""
+        return filters_mod.drop_warmup_shots(df, self.settings_warmup_mode.get())
 
     def _column_max(self, aliases):
         # Seeds the all-time speed PBs from the *full* history (incl. on-course
@@ -1133,12 +1135,14 @@ class SimAnalyticsApp:
         row2.pack(fill="x")
         theme.body_label(row2, "Ignore warm-up shots",
                          color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
-        theme.toggle_switch(
-            row2, accent=Colors.INFO, text="", variable=self.settings_ignore_warmup,
-            command=self._apply_settings, onvalue=True, offvalue=False,
+        SingleSelectDropdown(
+            row2, filters_mod.WARMUP_MODE_OPTIONS, self.settings_warmup_mode,
+            on_change=self._apply_settings, accent=Colors.INFO, width=190,
         ).pack(side="right")
-        theme.body_label(card, "Drops the first 5 shots of each session from the "
-                         "dashboards (records and totals still count every shot).",
+        theme.body_label(card, "Drops “getting loose” shots from the dashboards — "
+                         "either the first 5 of each session, or the first shot of "
+                         "every club (for mixed-club bags). Records and totals still "
+                         "count every shot.",
                          color=Colors.TEXT_MUTED, font=theme.font("caption"),
                          wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
 
