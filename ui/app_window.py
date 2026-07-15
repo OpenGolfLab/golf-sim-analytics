@@ -548,7 +548,8 @@ class SimAnalyticsApp:
 
         # Course-photo banner reusing the landing page's background image as
         # the sidebar's header; skipped silently if the photo is missing.
-        banner = course_banner(sidebar, self._find_background_image(), "Golf Sim Analytics")
+        banner = course_banner(sidebar, self._find_background_image(),
+                               "Golf Sim Analytics", scale=self.ui_scale)
         if banner is not None:
             banner.pack(fill=tk.X, padx=12, pady=(12, 4))
 
@@ -1505,6 +1506,7 @@ class SimAnalyticsApp:
                         "they're picked up automatically"),
             trends=compute_home_trends(self.master_df),
             records=compute_player_records(self.master_df),
+            scale=self.ui_scale,
         )
         home_frame.grid(row=0, column=0, sticky="nsew")
         self._home_frame = home_frame
@@ -1530,8 +1532,7 @@ class SimAnalyticsApp:
 
         header_color = CATEGORY_HEADER_COLOR.get(d.category, Colors.TEXT_PRIMARY)
         theme.section_label(
-            top_bar, name, color=header_color,
-            font=ctk.CTkFont(family=config.FONT_FAMILY, size=19, weight="bold"),
+            top_bar, name, color=header_color, font=theme.font("title", "bold"),
         ).pack(side=tk.LEFT)
 
         def update_local(*_a, n=name):

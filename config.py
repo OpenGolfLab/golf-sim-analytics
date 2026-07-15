@@ -167,6 +167,7 @@ FONT_SCALE = {
     "body": 12,
     "label": 14,
     "subheading": 16,
+    "title": 19,      # chart-panel headers
     "heading": 20,
     "display": 28,
 }

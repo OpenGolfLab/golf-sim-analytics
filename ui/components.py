@@ -19,11 +19,25 @@ the same way:
 from __future__ import annotations
 
 import tkinter as tk
+import tkinter.font as tkfont
 
 import customtkinter as ctk
 
-from config import Colors
+from config import Colors, FONT_FAMILY, FONT_SCALE
 from ui import theme
+
+
+def _fit_width(texts, extra: int = 24, min_w: int = 120, max_w: int = 360) -> int:
+    """Width (unscaled CTk units) that fits the widest of `texts` at the body
+    font, plus `extra` px of chrome (checkbox, padding), clamped to
+    [min_w, max_w]. Keeps dropdown popups from truncating long items (e.g.
+    'Jul 08, 2026 · 42 shots [stiff-tip]') while never running off-screen."""
+    try:
+        f = tkfont.Font(family=FONT_FAMILY, size=FONT_SCALE["body"])
+        widest = max((f.measure(str(t)) for t in texts), default=0)
+    except tk.TclError:
+        widest = 0
+    return max(min_w, min(max_w, widest + extra))
 
 
 class _PopupDropdownBase(ctk.CTkFrame):
@@ -156,6 +170,7 @@ class SingleSelectDropdown(_PopupDropdownBase):
         list_frame = ctk.CTkFrame(card, fg_color="transparent")
         list_frame.pack(padx=4, pady=4)
 
+        opt_w = _fit_width(self.options, extra=28)
         current = self.variable.get()
         for option in self.options:
             is_selected = option == current
@@ -168,7 +183,7 @@ class SingleSelectDropdown(_PopupDropdownBase):
                 text_color=Colors.TEXT_ACTIVE if is_selected else Colors.TEXT_PRIMARY,
                 font=theme.font("body", "bold" if is_selected else "normal"),
                 corner_radius=6,
-                width=180,
+                width=opt_w,
                 command=lambda o=option: self._select(o),
             ).pack(fill="x", pady=1)
 
@@ -249,8 +264,11 @@ class MultiSelectDropdown(_PopupDropdownBase):
         ).pack(side="right")
 
         list_height = min(320, max(1, len(self.variables)) * 30 + 10)
+        # Fit the widest item label (plus the checkbox + scrollbar chrome) so
+        # long labels don't truncate inside the checklist.
+        scroll_w = _fit_width(self.variables.keys(), extra=54)
         scroll = ctk.CTkScrollableFrame(
-            card, width=170, height=list_height, fg_color="transparent",
+            card, width=scroll_w, height=list_height, fg_color="transparent",
         )
         scroll.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
