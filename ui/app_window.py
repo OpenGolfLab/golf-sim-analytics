@@ -100,7 +100,7 @@ CATEGORY_HEADER_COLOR = {
 
 # Panel-entry keys that belong to a chart figure and must be dropped when
 # the panel is destroyed.
-_PANEL_STATE_KEYS = ("panel", "fig", "canvas", "rendered_once", "bucket")
+_PANEL_STATE_KEYS = ("panel", "fig", "canvas", "rendered_once", "_rendered_sig")
 
 
 class SimAnalyticsApp:
@@ -1351,9 +1351,33 @@ class SimAnalyticsApp:
             entry.pop(key, None)
         entry.pop("_resize_state", None)
 
+    def _font_scale_for_fig(self, fig) -> int:
+        """Chart font point-size derived from the figure's *actual* pixel
+        geometry, not the panel count — so a stacked half-height panel and a
+        side-by-side half-width panel get fonts suited to their real space
+        instead of the same number.
+
+        The ui-scale factor already lives in the figure DPI (text grows with
+        DPI), so we normalize the pixel size back to a DPI-100 reference here
+        to avoid double-counting it. The smaller (governing) dimension drives
+        the size, since that's what runs out of room first.
+        """
+        w_px, h_px = fig.get_size_inches() * fig.dpi
+        ref = 100.0 / max(fig.dpi, 1)
+        governing = min(w_px, h_px) * ref
+        # ~14pt at a comfortable full panel, easing down for smaller panels.
+        font = self.plot_font_scale - (1000 - governing) * 0.006
+        return int(max(9, min(16, round(font))))
+
     @staticmethod
-    def _font_bucket(count: int) -> int:
-        return 3 if count >= 3 else count
+    def _size_signature(fig) -> tuple:
+        """Coarse geometry fingerprint (≈60px granularity) used to decide when
+        a resized panel needs a full re-render — recomputing fonts and any
+        height-aware layout — versus just a bitmap rescale. Kept coarse so a
+        drag doesn't re-render every debounce tick, only when the panel's size
+        class actually changes."""
+        w_px, h_px = fig.get_size_inches() * fig.dpi
+        return (round(w_px / 60), round(h_px / 60))
 
     def _panel_placement(self, active):
         """Grid placement for up to two panels: returns
@@ -1459,21 +1483,15 @@ class SimAnalyticsApp:
         self.grid_frame.columnconfigure(0, weight=1)
         self.grid_frame.columnconfigure(1, weight=1 if cols_used == 2 else 0)
 
-        bucket = self._font_bucket(len(placement))
-        frames = None
+        # Persisting panels are just re-gridded; the <Configure> event their
+        # new size fires drives any needed re-render through _apply_resize
+        # (which re-renders when the panel's size class changes). New panels
+        # get built and do their first render on their first <Configure>.
         for name, (r, c) in placement.items():
             entry = self.plot_state[name]
             if "panel" in entry:
                 entry["panel"].grid_configure(row=r, column=c)
-                if entry.get("bucket") != bucket and entry.get("rendered_once"):
-                    entry["bucket"] = bucket
-                    if frames is None:
-                        frames = self._filtered_frames()
-                    self.update_single_plot(name, len(placement), frames=frames)
-                else:
-                    entry["bucket"] = bucket
             else:
-                entry["bucket"] = bucket
                 self._place_single_plot_panel(name, r, c)
 
     def _render_home_page(self):
@@ -1665,9 +1683,14 @@ class SimAnalyticsApp:
                 fig.set_size_inches(width / dpi, height / dpi, forward=True)
                 canvas.draw_idle()
 
+            count = sum(1 for e in self.plot_state.values() if e["var"].get()) or 1
             if not entry.get("rendered_once"):
                 entry["rendered_once"] = True
-                count = sum(1 for e in self.plot_state.values() if e["var"].get()) or 1
+                self.update_single_plot(name, count)
+            elif self._size_signature(fig) != entry.get("_rendered_sig"):
+                # The panel changed size class (e.g. solo -> stacked): re-render
+                # so fonts and any height-aware layout recompute, rather than
+                # just rescaling the old bitmap to the new size.
                 self.update_single_plot(name, count)
 
         def on_configure(event):
@@ -1691,14 +1714,13 @@ class SimAnalyticsApp:
             entry["latest_quality"] = self._live_shot_quality(
                 self.live_shot_buffer[-1] if self.live_shot_buffer else None)
 
-        # Fonts shrink as more panels share the grid (each panel gets smaller).
-        # 4-up panels are the tightest — especially dense ones like Club Gapping
-        # with a label per club — so they step down hardest to avoid overlap.
-        base_scale = self.plot_font_scale
-        reduction = {1: 0, 2: 1, 3: 3}.get(num_plots, 5)  # 4+ -> base - 5
-        font_scale = max(8, base_scale - reduction)
-
         fig = entry["fig"]
+
+        # Font size tracks the panel's real pixel geometry (see
+        # _font_scale_for_fig), so a chart adapts to whatever space it actually
+        # has — solo, side-by-side, or stacked — rather than a panel-count guess.
+        font_scale = self._font_scale_for_fig(fig)
+        entry["_rendered_sig"] = self._size_signature(fig)
 
         # Live Dispersion (self.live_shot_buffer) and On-Course Play
         # (self._full_df's course rounds) both have their own data source and

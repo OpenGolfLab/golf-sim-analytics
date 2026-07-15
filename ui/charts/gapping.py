@@ -36,11 +36,12 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     ax = fig.add_subplot(111)
     carry_col = find_col(df, CARRY_ALIASES)
     legend_handles = []
-    # In a crowded 3-4 panel grid this chart's per-club "+/- vs even spacing"
-    # labels are the first thing to overlap (one per club, up to 15 of them).
-    # Drop just those text labels when the panel is small — the target dots and
-    # connectors stay, and the exact delta is still on each club's hover.
-    compact = config.get("num_plots", 1) >= 3
+    # This chart's per-club "+/- vs even spacing" labels (one per club, up to
+    # 15) are the first thing to overlap when the panel gets tight. Drop just
+    # those text labels once the panel shrinks enough that the font is small —
+    # the target dots and connectors stay, and the exact delta is still on each
+    # club's hover. font_scale tracks the panel's real geometry.
+    compact = font_scale <= 10
     if "club" in df.columns and carry_col:
         order = sorted(df["club"].dropna().unique(), key=get_club_rank)
 

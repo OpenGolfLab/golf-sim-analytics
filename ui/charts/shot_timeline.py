@@ -61,8 +61,7 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     style_axes(ax, font_scale, grid="y")
     ax.set_title(f"{int(bottom.sum()):,} shots · {len(days)} days practiced",
                  fontsize=font_scale - 1, color=Colors.TEXT_MUTED, pad=6)
-    if config.get("num_plots", 1) < 3:
-        club_legend(ax, club_colors, clubs, font_scale, loc="upper left")
+    club_legend(ax, club_colors, clubs, font_scale, loc="upper left")
 
     _draw_tiles(ax_tiles, df, counts, len(days), font_scale)
 
