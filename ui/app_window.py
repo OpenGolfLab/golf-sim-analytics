@@ -496,8 +496,11 @@ class SimAnalyticsApp:
                        "days compare fairly.")
         self.temp_norm_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
         self.temp_norm_frame.grid(row=0, column=7)
+        # No placeholder_text: CTkEntry ignores it once a textvariable is bound,
+        # so it never showed. A blank field means "off" (conveyed by the label's
+        # tooltip); the muted "°F" suffix labels the unit.
         temp_entry = ctk.CTkEntry(self.temp_norm_frame, textvariable=self.global_temp_var,
-                                  width=54, justify="center", placeholder_text="off")
+                                  width=54, justify="center")
         temp_entry.pack(side=tk.LEFT)
         theme.body_label(self.temp_norm_frame, "°F", color=Colors.TEXT_MUTED).pack(side=tk.LEFT, padx=(4, 0))
         temp_entry.bind("<Return>", self._on_filter_changed)
@@ -1092,14 +1095,36 @@ class SimAnalyticsApp:
             return None
 
     def _open_settings(self):
+        # Singleton: re-clicking Settings focuses the existing window instead of
+        # stacking duplicates.
+        existing = getattr(self, "_settings_win", None)
+        if existing is not None and existing.winfo_exists():
+            existing.deiconify()
+            existing.lift()
+            existing.focus_force()
+            return
+
         win = ctk.CTkToplevel(self.root)
+        self._settings_win = win
         win.title("Settings")
         win.configure(fg_color=Colors.BG_SURFACE)
         win.transient(self.root)
-        win.geometry(f"+{self.root.winfo_rootx() + 260}+{self.root.winfo_rooty() + 140}")
+        # Clamp the window on-screen: near the right/bottom edge the old fixed
+        # +260,+140 offset could push it partly off the display.
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        x = min(self.root.winfo_rootx() + 260, max(0, sw - 480))
+        y = min(self.root.winfo_rooty() + 140, max(0, sh - 640))
+        win.geometry(f"+{x}+{y}")
+        win.protocol("WM_DELETE_WINDOW", lambda: (setattr(self, "_settings_win", None),
+                                                  win.destroy()))
 
-        card = theme.card_frame(win)
-        card.pack(fill="both", expand=True, padx=16, pady=16)
+        # The body scrolls so the dialog stays usable at the 1000x640 minimum
+        # window (and at large display scales, where the rows get taller).
+        outer = theme.card_frame(win)
+        outer.pack(fill="both", expand=True, padx=16, pady=16)
+        card = ctk.CTkScrollableFrame(outer, fg_color="transparent",
+                                      scrollbar_button_color=Colors.BG_HOVER)
+        card.pack(fill="both", expand=True, padx=4, pady=4)
         theme.section_label(card, "Settings", color=Colors.INFO).pack(anchor="w", pady=(2, 10))
 
         # Display scale — persists across launches (see data/settings.py). Lets
@@ -1193,12 +1218,24 @@ class SimAnalyticsApp:
                          color=Colors.TEXT_MUTED, font=theme.font("caption"),
                          wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
 
+        def _close():
+            self._settings_win = None
+            win.destroy()
+
         theme.outline_button(card, accent=Colors.INFO, text="Manage sessions…",
-                             command=lambda: (win.destroy(), self._open_manage_sessions()),
+                             command=lambda: (_close(), self._open_manage_sessions()),
                              width=170).pack(anchor="w", pady=(0, 12))
 
         theme.outline_button(card, accent=Colors.TEXT_MUTED, text="Close",
-                             command=win.destroy, width=100).pack(side="right")
+                             command=_close, width=100).pack(side="right")
+
+        # Bound the window height so the scrollable body engages instead of the
+        # dialog growing taller than the screen at large scales / many rows.
+        win.update_idletasks()
+        sh = win.winfo_screenheight()
+        req_w = max(440, outer.winfo_reqwidth() + 32)
+        req_h = min(outer.winfo_reqheight() + 32, sh - 120)
+        win.geometry(f"{req_w}x{req_h}")
         win.after(120, lambda: (win.winfo_exists() and (win.lift(), win.focus_force())))
 
     def _sample_set_available(self) -> bool:
