@@ -472,7 +472,7 @@ class SimAnalyticsApp:
         self.contribute_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
 
         self.settings_button = theme.outline_button(
-            top_bar, accent=Colors.ACCENT, text="⚙ Settings", command=self._open_settings,
+            top_bar, accent=Colors.ACCENT, text="Settings", command=self._open_settings,
         )
         self.settings_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
 
@@ -557,7 +557,7 @@ class SimAnalyticsApp:
             banner.pack(fill=tk.X, padx=12, pady=(12, 4))
 
         metrics_card, metrics_body = theme.section_card(
-            sidebar, "Metrics Dashboards", accent=Colors.INFO, icon="📊",
+            sidebar, "Metrics Dashboards", accent=Colors.INFO,
         )
         metrics_card.pack(fill=tk.X, padx=12, pady=(8, 8))
         for d in DASHBOARDS:
@@ -565,7 +565,7 @@ class SimAnalyticsApp:
                 self._nav_item(metrics_body, d)
 
         opt_card, opt_body = theme.section_card(
-            sidebar, "Optimization Dashboards", accent=Colors.WARNING, icon="🎯",
+            sidebar, "Optimization Dashboards", accent=Colors.WARNING,
         )
         opt_card.pack(fill=tk.X, padx=12, pady=(0, 8))
         for d in DASHBOARDS:
@@ -573,7 +573,7 @@ class SimAnalyticsApp:
                 self._nav_item(opt_body, d)
 
         fitting_card, fitting_body = theme.section_card(
-            sidebar, "Club Fitting", accent=Colors.SUCCESS, icon="⛳",
+            sidebar, "Club Fitting", accent=Colors.SUCCESS,
         )
         fitting_card.pack(fill=tk.X, padx=12, pady=(0, 8))
         for d in DASHBOARDS:
@@ -581,7 +581,7 @@ class SimAnalyticsApp:
                 self._nav_item(fitting_body, d)
 
         speed_card, speed_body = theme.section_card(
-            sidebar, "Speed Training", accent=Colors.DANGER, icon="⚡",
+            sidebar, "Speed Training", accent=Colors.DANGER,
         )
         speed_card.pack(fill=tk.X, padx=12, pady=(0, 8))
         for d in DASHBOARDS:
@@ -589,7 +589,7 @@ class SimAnalyticsApp:
                 self._nav_item(speed_body, d)
 
         course_card, course_body = theme.section_card(
-            sidebar, "On-Course Play", accent=Colors.SUCCESS, icon="🏌️",
+            sidebar, "On-Course Play", accent=Colors.SUCCESS,
         )
         course_card.pack(fill=tk.X, padx=12, pady=(0, 8))
         for d in DASHBOARDS:
