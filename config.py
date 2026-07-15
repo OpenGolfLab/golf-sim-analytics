@@ -260,6 +260,19 @@ def get_club_rank(club_name) -> int:
     return CLUB_ORDER.get(normalize_club_name(club_name), 99)
 
 
+# The canonical bag: every real club this app knows how to place, color, and
+# fit. normalize_club_name() maps all real spellings onto one of these, so a
+# label that still isn't in here after normalization is junk — a spreadsheet
+# error ("#Div/0!", "#Ref!") or an unmapped launch-monitor slot ("Club8") — not
+# a real club.
+CANONICAL_CLUBS = frozenset(CLUB_ORDER)
+
+
+def is_bag_club(club_name) -> bool:
+    """True only for a label that resolves to a real club in the bag."""
+    return normalize_club_name(club_name) in CANONICAL_CLUBS
+
+
 # ---------------------------------------------------------------------------
 # Per-club color assignment — one fixed hex per canonical club name, used
 # everywhere a chart or control needs to color-code by club (Dispersion,

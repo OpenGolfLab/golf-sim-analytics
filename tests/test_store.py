@@ -302,7 +302,7 @@ def test_load_master_keeps_rows_missing_clubspeed_when_other_files_have_it(tmp_p
     csv_sourced.to_parquet(tmp_path / "csv.parquet", index=False)
 
     live_sourced = pd.DataFrame({
-        "club": ["Club24"],
+        "club": ["7I"],
         "carry": [200.0],
         "session_date": [pd.Timestamp("2026-01-02")],
         "session_id": ["live-01-02-26-10-00-00-practice"],
@@ -313,7 +313,27 @@ def test_load_master_keeps_rows_missing_clubspeed_when_other_files_have_it(tmp_p
     out = load_master_dataframe(tmp_path)
 
     assert len(out) == 2
-    assert set(out["club"]) == {"Dr", "Club24"}
+    assert set(out["club"]) == {"Dr", "7I"}
+
+
+def test_load_master_drops_unrecognized_club_labels(tmp_path):
+    """Junk club labels that survive normalization — a spreadsheet-error token
+    or an unmapped launch-monitor slot — are dropped so they don't pollute the
+    per-club axes; real clubs are kept."""
+    from data.store import load_master_dataframe
+
+    df = pd.DataFrame({
+        "club": ["Dr", "7I", "Club8", "#Ref!"],
+        "carry": [250.0, 165.0, 255.0, 120.0],
+        "session_date": [pd.Timestamp("2026-01-01")] * 4,
+        "session_id": ["a"] * 4,
+    })
+    df.to_parquet(tmp_path / "s.parquet", index=False)
+
+    out = load_master_dataframe(tmp_path)
+
+    assert set(out["club"]) == {"Dr", "7I"}
+    assert "Club8" not in set(out["club"])
 
 
 def test_load_master_still_drops_rows_missing_carry(tmp_path):

@@ -90,6 +90,23 @@ def load_master_dataframe(data_dir: Path) -> pd.DataFrame:
         )
         df.loc[has_index, "club"] = resolved
 
+    if "club" in df.columns:
+        # Drop rows whose club label doesn't resolve to a real bag club — a
+        # spreadsheet error that survived the div/0 scrub ("#Ref!", "#N/A") or
+        # an unmapped launch-monitor slot ("Club8"). These are never real
+        # clubs, and left in they pollute every per-club axis, legend, and
+        # fitting band. The Parquet files are untouched; this is load-time only.
+        from config import CANONICAL_CLUBS
+        valid = df["club"].isin(CANONICAL_CLUBS)
+        if not valid.all():
+            dropped = df.loc[~valid, "club"].value_counts()
+            log.warning(
+                "Dropping %d shot(s) with unrecognized club labels: %s",
+                int((~valid).sum()),
+                ", ".join(f"{lbl}×{n}" for lbl, n in dropped.items()),
+            )
+            df = df[valid]
+
     if "round_type" not in df.columns:
         # Every CSV export is sourced from GSPro's Practice Range shot
         # list (see data/export_watcher.py) — "on_course" only ever comes
