@@ -43,6 +43,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from live.lm_detect import detect_lm
 from live.shot_data import archive_round, flatten_shot
 
 log = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class LiveRoundWatcher:
         schedule_on_main_thread: Callable[[Callable[[], None]], None] | None = None,
         poll_interval: float = 2.0,
         club_lookup=None,
+        lm_log_dir: Path | None = None,
     ):
         self.round_file = round_file
         self.data_dir = data_dir
@@ -70,6 +72,12 @@ class LiveRoundWatcher:
         # Optional live.gspro_db.ClubDataLookup — enriches shots with the club
         # speed / smash / AoA currentRound.dat lacks (see live/gspro_db.py).
         self.club_lookup = club_lookup
+        # Where GSPro's Unity Player.log lives (normally the same folder as
+        # round_file). At finalize time the newest "LM Type" line in it names
+        # the connected launch monitor — stamped onto the archived session so
+        # contribute.verification_block can cross-check the user's claimed
+        # monitor. None disables detection.
+        self.lm_log_dir = lm_log_dir
 
         self._first_shot_id = None
         self._seen_shot_ids: set = set()
@@ -205,8 +213,9 @@ class LiveRoundWatcher:
     def _finalize_buffer(self) -> None:
         if not self._buffer or self._already_archived_current:
             return
+        lm_info = detect_lm(self.lm_log_dir) if self.lm_log_dir else {}
         info = archive_round(self._buffer, self.data_dir, self.raw_archive_dir,
-                             club_lookup=self.club_lookup)
+                             club_lookup=self.club_lookup, lm_info=lm_info)
         self._already_archived_current = True
         self._last_archived_mtime = self._last_mtime
         self._persist_last_archived_mtime()

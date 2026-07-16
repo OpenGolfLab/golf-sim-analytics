@@ -24,7 +24,9 @@ from data.columns import (
     DESCENT_ANGLE_ALIASES, SPIN_RATE_ALIASES, START_DIR_ALIASES, SPIN_AXIS_ALIASES,
 )
 
-SCHEMA_VERSION = "1.1"   # 1.1 = structured environment.instrument (see instrument_block)
+SCHEMA_VERSION = "1.2"   # 1.1 = structured environment.instrument (see instrument_block)
+                         # 1.2 = + instrument.verification (claimed monitor vs
+                         #       the connectType GSPro's own log reported)
 CONSENT_POLICY_VERSION = "1.0"
 HANDICAP_BANDS = ["scratch", "1-4", "5-9", "10-14", "15-19", "20-24", "25+", "unknown"]
 
@@ -61,6 +63,82 @@ LAUNCH_MONITORS = [
     "SkyTrak", "Garmin Approach R10", "Mevo+", "FlightScope Mevo",
     "Rapsodo MLM2PRO", "Square Golf", "PRGR", "Other",
 ]
+
+
+# Manufacturer keys for the mismatch check. Two independent maps resolve to
+# the same key space: the model the user *claims* in the dropdown, and the
+# connectType GSPro's Player.log *observed* (via live/lm_detect.py, stamped on
+# live-tracked sessions as an lm_connect_type column). "Bushnell Launch Pro"
+# maps to foresight deliberately — it's Foresight-built hardware that connects
+# through Foresight's software stack.
+_MODEL_MAKER = {
+    "Trackman": "trackman",
+    "Foresight GCQuad": "foresight", "Foresight GC3": "foresight",
+    "Foresight GCHawk": "foresight", "Bushnell Launch Pro": "foresight",
+    "Uneekor EYE XO": "uneekor", "Uneekor QED": "uneekor", "Uneekor EYE MINI": "uneekor",
+    "Full Swing KIT": "fullswing",
+    "SkyTrak+": "skytrak", "SkyTrak": "skytrak",
+    "Garmin Approach R50": "garmin", "Garmin Approach R10": "garmin",
+    "Mevo+": "flightscope", "FlightScope Mevo": "flightscope",
+    "Rapsodo MLM2PRO": "rapsodo",
+    "Square Golf": "square",
+    "PRGR": "prgr",
+}
+# connectType -> manufacturer by keyword, not exact string: only "FlightScope"
+# has been observed in a real Player.log so far, so substring matching keeps
+# this robust to GSPro's exact naming for other vendors. An unrecognized
+# connectType resolves to None -> "unverified", never a false mismatch.
+# Generic bridge connects (GSPro Connect / OpenAPI) carry no manufacturer, so
+# they intentionally have no keyword here.
+_CONNECT_TYPE_KEYWORDS = [
+    ("flightscope", "flightscope"), ("mevo", "flightscope"),
+    ("foresight", "foresight"), ("bushnell", "foresight"), ("launch pro", "foresight"),
+    ("trackman", "trackman"),
+    ("uneekor", "uneekor"),
+    ("full swing", "fullswing"), ("fullswing", "fullswing"),
+    ("skytrak", "skytrak"),
+    ("garmin", "garmin"), ("r10", "garmin"), ("r50", "garmin"),
+    ("rapsodo", "rapsodo"), ("mlm2", "rapsodo"),
+    ("square", "square"),
+    ("prgr", "prgr"),
+]
+
+
+def _maker_from_connect_type(connect_type: str) -> str | None:
+    ct = (connect_type or "").strip().lower()
+    for kw, maker in _CONNECT_TYPE_KEYWORDS:
+        if kw in ct:
+            return maker
+    return None
+
+
+def verification_block(model: str, observed_connect_types) -> dict:
+    """Cross-check the user's claimed launch monitor against the connectType(s)
+    GSPro's own log reported for the contributed sessions.
+
+    The claim stays the source of truth for model/kind/spin; this only judges
+    manufacturer. Statuses:
+
+    - "match": every observed connectType that resolves to a manufacturer
+      agrees with the claimed model's manufacturer.
+    - "mismatch": any resolvable observed connectType names a *different*
+      manufacturer than the claim — the intake side treats this as bad data.
+    - "unverified": nothing to check — no live-tracked sessions in the bundle,
+      no claim ("", "Other"), or only connectTypes we can't attribute (e.g. a
+      generic GSPro Connect bridge).
+    """
+    observed = sorted({str(ct).strip() for ct in (observed_connect_types or [])
+                       if str(ct).strip() and str(ct).lower() != "nan"})
+    claimed_maker = _MODEL_MAKER.get((model or "").strip())
+    observed_makers = {m for m in (_maker_from_connect_type(ct) for ct in observed)
+                       if m is not None}
+    if not claimed_maker or not observed_makers:
+        status = "unverified"
+    elif observed_makers - {claimed_maker}:
+        status = "mismatch"
+    else:
+        status = "match"
+    return {"status": status, "observed_connect_types": observed}
 
 
 def instrument_block(model: str) -> dict:
@@ -161,10 +239,23 @@ def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monit
         "contributor_uuid": get_contributor_uuid(app_dir),
         "created_date": datetime.date.today().isoformat(),
         "consent": {"policy_version": CONSENT_POLICY_VERSION, "accepted": True},
-        "environment": {"platform": "GSPro", "instrument": instrument_block(launch_monitor)},
+        "environment": {"platform": "GSPro", "instrument": {
+            **instrument_block(launch_monitor),
+            # Silent honesty check: live-tracked sessions carry the
+            # connectType GSPro's log actually reported (lm_connect_type,
+            # stamped by live/shot_data.archive_round). A manufacturer
+            # conflict with the claimed model -> "mismatch", which the intake
+            # side treats as bad data. Never surfaced in the UI.
+            "verification": verification_block(
+                launch_monitor,
+                df["lm_connect_type"].dropna().unique()
+                if "lm_connect_type" in df.columns else [],
+            ),
+        }},
         "self_report": {"handicap_band": handicap_band if handicap_band in HANDICAP_BANDS else "unknown"},
         "shot_count": int(len(out)),
     }
+
     return manifest, out
 
 

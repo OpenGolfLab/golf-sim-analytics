@@ -158,6 +158,10 @@ class SimAnalyticsApp:
             # Enriches live/archived range shots with club speed, smash and AoA
             # from GSPro.db (currentRound.dat doesn't carry them).
             club_lookup=ClubDataLookup(config.GSPRO_DB_FILE),
+            # GSPro's Player.log names the connected launch monitor ("LM Type"
+            # line per shot) — stamped on archived sessions to cross-check the
+            # contribute dialog's claimed monitor (live/lm_detect.py).
+            lm_log_dir=config.GSPRO_ROUND_FILE.parent,
         )
 
         self.global_time_var = tk.StringVar(value=filters_mod.TIME_ALL)
