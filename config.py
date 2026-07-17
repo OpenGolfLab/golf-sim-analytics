@@ -180,9 +180,9 @@ FONT_FAMILY = "Segoe UI"
 
 # Typographic scale (points): caption / body / label / subheading / heading / display
 FONT_SCALE = {
-    "caption": 11,
-    "body": 12,
-    "label": 14,
+    "caption": 12,
+    "body": 13,
+    "label": 15,
     "subheading": 16,
     "title": 19,      # chart-panel headers
     "heading": 20,

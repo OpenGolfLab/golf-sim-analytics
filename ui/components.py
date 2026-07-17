@@ -27,13 +27,14 @@ from config import Colors, FONT_FAMILY, FONT_SCALE
 from ui import theme
 
 
-def _fit_width(texts, extra: int = 24, min_w: int = 120, max_w: int = 360) -> int:
-    """Width (unscaled CTk units) that fits the widest of `texts` at the body
-    font, plus `extra` px of chrome (checkbox, padding), clamped to
+def _fit_width(texts, extra: int = 24, min_w: int = 120, max_w: int = 360,
+               size_name: str = "body") -> int:
+    """Width (unscaled CTk units) that fits the widest of `texts` at the
+    `size_name` font, plus `extra` px of chrome (checkbox, padding), clamped to
     [min_w, max_w]. Keeps dropdown popups from truncating long items (e.g.
     'Jul 08, 2026 · 42 shots [stiff-tip]') while never running off-screen."""
     try:
-        f = tkfont.Font(family=FONT_FAMILY, size=FONT_SCALE["body"])
+        f = tkfont.Font(family=FONT_FAMILY, size=FONT_SCALE[size_name])
         widest = max((f.measure(str(t)) for t in texts), default=0)
     except tk.TclError:
         widest = 0
@@ -89,6 +90,16 @@ class _PopupDropdownBase(ctk.CTkFrame):
         root.bind("<ButtonPress>", self._on_root_click, add="+")
         root.bind("<Escape>", lambda _e: self._close_popup(), add="+")
         root.bind("<Configure>", self._on_root_configure, add="+")
+        # Minimizing the app must take the popup with it: the popup is an
+        # overrideredirect+topmost toplevel the window manager doesn't tie to
+        # the main window, so without this it stays floating over other apps.
+        root.bind("<Unmap>", self._on_root_unmap, add="+")
+
+    def _on_root_unmap(self, event):
+        # Children also fire <Unmap> (e.g. pack_forget) — only the toplevel's
+        # own unmap means the app was minimized/hidden.
+        if self._popup_open() and str(event.widget) == str(self.winfo_toplevel()):
+            self._close_popup()
 
     def _on_root_click(self, event):
         """Click-away: any press in the parent window closes the popup.
@@ -221,6 +232,11 @@ class DropdownPanel:
     _MARGIN_BOTTOM = 12
     _MIN_H = 80    # floor for a pathologically short window; below this, scroll
     _CHROME_FALLBACK = 22  # only used before the popup has been laid out once
+    # Tall panels stop at ~2/3 of the window height and scroll from there,
+    # rather than running to the window's bottom edge — a panel that drapes the
+    # full height reads as a page, not a menu, and the content near the bottom
+    # ended up cramped against the window edge.
+    _MAX_FRACTION = 2 / 3
 
     def _chrome(self) -> int:
         """Pixels the popup needs *on top of* the content height: our card
@@ -246,13 +262,14 @@ class DropdownPanel:
         ax, ay = self.anchor.winfo_rootx(), self.anchor.winfo_rooty()
         below = ay + self.anchor.winfo_height() + 2
 
-        # Room available before we'd run off the bottom of the app window. The
-        # app window (not the screen) is the bound on purpose: a panel hanging
-        # past the window onto the desktop behind it looks broken, and on a tall
-        # screen with a small window the screen bound is no bound at all.
+        # Room available: capped at _MAX_FRACTION of the app window's height
+        # (and never past the window or screen). The app window — not the
+        # screen — is the bound on purpose: a panel hanging past the window
+        # onto the desktop behind it looks broken.
         root = self.anchor.winfo_toplevel()
         window_bottom = root.winfo_rooty() + root.winfo_height()
-        available = (min(window_bottom, popup.winfo_screenheight())
+        cap_bottom = root.winfo_rooty() + int(root.winfo_height() * self._MAX_FRACTION)
+        available = (min(cap_bottom, window_bottom, popup.winfo_screenheight())
                      - below - self._MARGIN_BOTTOM)
 
         sw = popup.winfo_screenwidth()
@@ -279,6 +296,13 @@ class DropdownPanel:
         root.bind("<ButtonPress>", self._on_root_click, add="+")
         root.bind("<Escape>", lambda _e: self.close(), add="+")
         root.bind("<Configure>", self._on_root_configure, add="+")
+        # Minimizing the app must take the panel with it (overrideredirect +
+        # topmost windows otherwise keep floating over other applications).
+        root.bind("<Unmap>", self._on_root_unmap, add="+")
+
+    def _on_root_unmap(self, event):
+        if self.is_open() and str(event.widget) == str(self.anchor.winfo_toplevel()):
+            self.close()
 
     def _on_root_click(self, event):
         # A click inside the panel lands on the panel's own toplevel and never
@@ -344,7 +368,9 @@ class SingleSelectDropdown(_PopupDropdownBase):
         list_frame = ctk.CTkFrame(card, fg_color="transparent")
         list_frame.pack(padx=4, pady=4)
 
-        opt_w = _fit_width(self.options, extra=28)
+        # Option rows read at "label" size — a step up from body text, so the
+        # things you're choosing between are the most legible part of the popup.
+        opt_w = _fit_width(self.options, extra=28, size_name="label")
         current = self.variable.get()
         for option in self.options:
             is_selected = option == current
@@ -355,9 +381,10 @@ class SingleSelectDropdown(_PopupDropdownBase):
                 fg_color=Colors.BG_HOVER if is_selected else "transparent",
                 hover_color=Colors.BG_HOVER,
                 text_color=Colors.TEXT_ACTIVE if is_selected else Colors.TEXT_PRIMARY,
-                font=theme.font("body", "bold" if is_selected else "normal"),
+                font=theme.font("label", "bold" if is_selected else "normal"),
                 corner_radius=6,
                 width=opt_w,
+                height=theme.CONTROL_HEIGHT,
                 command=lambda o=option: self._select(o),
             ).pack(fill="x", pady=1)
 
@@ -439,10 +466,10 @@ class MultiSelectDropdown(_PopupDropdownBase):
             font=theme.font("caption", "bold"), command=self._close_popup,
         ).pack(side="right")
 
-        list_height = min(320, max(1, len(self.variables)) * 30 + 10)
+        list_height = min(360, max(1, len(self.variables)) * 32 + 10)
         # Fit the widest item label (plus the checkbox + scrollbar chrome) so
         # long labels don't truncate inside the checklist.
-        scroll_w = _fit_width(self.variables.keys(), extra=54)
+        scroll_w = _fit_width(self.variables.keys(), extra=54, size_name="label")
         scroll = ctk.CTkScrollableFrame(
             card, width=scroll_w, height=list_height, fg_color="transparent",
         )
@@ -452,7 +479,7 @@ class MultiSelectDropdown(_PopupDropdownBase):
             color = self.item_colors.get(item_name)
             extra = dict(fg_color=color, hover_color=color, border_color=color) if color else {}
             theme.nav_checkbox(
-                scroll, text=item_name, variable=var,
+                scroll, text=item_name, variable=var, font=theme.font("label"),
                 command=lambda n=item_name: self._on_check(n), **extra,
             ).pack(anchor="w", pady=2, fill="x")
 

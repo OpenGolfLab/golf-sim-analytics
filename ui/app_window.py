@@ -142,6 +142,15 @@ class SimAnalyticsApp:
         # fall back to a name generated from the contributor id (see
         # contribute.resolve_display_name); never blank on the wire.
         self.settings_display_name = tk.StringVar(value=self._settings.get("display_name", ""))
+        # Persist on every change via a single app-lifetime trace on the var —
+        # NOT via KeyRelease/FocusOut bindings on the Settings entry. The entry
+        # lives inside an overrideredirect popup, and on Windows those have
+        # unreliable focus/keyboard event delivery, so widget events can be
+        # missed (a paste fires no KeyRelease at all). The textvariable updates
+        # regardless of events, so tracing it can't lose a name.
+        self.settings_display_name.trace_add(
+            "write",
+            lambda *_a: settings_mod.set("display_name", self.settings_display_name.get()))
         # Optional override for GSPro's data folder (live tracking source);
         # blank means use the standard auto-detected location.
         self.settings_gspro_dir = tk.StringVar(value=self._settings.get("gspro_data_dir", ""))
@@ -688,7 +697,15 @@ class SimAnalyticsApp:
         from ui.contribute_dialog import build_contribute_body
         panel = getattr(self, "_contribute_panel", None)
         if panel is None:
-            panel = DropdownPanel(self.data_button, build_contribute_body, width=430)
+            # The name comes from the LIVE Settings var, evaluated on every
+            # open (build_content runs per open) — not from settings.json — so
+            # a name typed seconds ago shows here even if a disk write hasn't
+            # happened or failed.
+            panel = DropdownPanel(
+                self.data_button,
+                lambda card, close: build_contribute_body(
+                    card, close, configured_name=self.settings_display_name.get()),
+                width=430)
             self._contribute_panel = panel
         panel.toggle()
 
@@ -1473,7 +1490,7 @@ class SimAnalyticsApp:
         # Re-clicking toggles it closed; the panel also closes on click-away.
         panel = getattr(self, "_settings_panel", None)
         if panel is None:
-            panel = DropdownPanel(self.settings_button, self._build_settings_body, width=320)
+            panel = DropdownPanel(self.settings_button, self._build_settings_body, width=400)
             self._settings_panel = panel
         panel.toggle()
 
@@ -1487,7 +1504,7 @@ class SimAnalyticsApp:
         row = ctk.CTkFrame(card, fg_color="transparent")
         row.pack(fill="x")
         theme.body_label(row, "Display name",
-                         color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
+                         color=Colors.TEXT_PRIMARY, font=theme.font("label")).pack(side="left", padx=(0, 24))
         entry = ctk.CTkEntry(
             row, textvariable=self.settings_display_name, width=150,
             height=theme.CONTROL_HEIGHT, corner_radius=theme.CONTROL_RADIUS,
@@ -1497,7 +1514,7 @@ class SimAnalyticsApp:
         entry.pack(side="right")
 
         status = theme.body_label(card, "", color=Colors.TEXT_MUTED,
-                                  font=theme.font("caption"), wraplength=300,
+                                  font=theme.font("caption"), wraplength=380,
                                   justify="left", anchor="w")
         status.pack(anchor="w", pady=(6, 0))
 
@@ -1523,28 +1540,19 @@ class SimAnalyticsApp:
                          "Until it's valid, the generated name is used.",
                     text_color=Colors.WARNING)
 
-        # Persist on every keystroke (validated at the point of use, so a
-        # half-typed name is harmless) — there's no Save button in this panel,
-        # and a name lost to a click-away dismissal is exactly the kind of small
-        # betrayal that stops people bothering to set one.
-        #
-        # Bound to the entry rather than traced on the StringVar on purpose: the
-        # var outlives the panel, so a trace added here would stack up another
-        # copy on every open and write the setting N times per keystroke. These
-        # bindings die with the widget.
-        def _on_change(_event=None):
-            settings_mod.set("display_name", self.settings_display_name.get())
-            _refresh()
-
-        entry.bind("<KeyRelease>", _on_change, add="+")
-        entry.bind("<FocusOut>", _on_change, add="+")
+        # Persistence is handled by the app-lifetime trace on the var (see
+        # __init__) — it can't miss a change the way widget events can inside an
+        # overrideredirect popup. These bindings only refresh the inline status
+        # text, and they die with the widget, so nothing stacks across opens.
+        entry.bind("<KeyRelease>", lambda _e: _refresh(), add="+")
+        entry.bind("<FocusOut>", lambda _e: _refresh(), add="+")
         _refresh()
 
         theme.body_label(
             card, "Shown publicly next to the data you contribute. Everything "
                   "else in a contribution stays anonymous.",
             color=Colors.TEXT_MUTED, font=theme.font("caption"),
-            wraplength=300, justify="left",
+            wraplength=380, justify="left",
         ).pack(anchor="w", pady=(4, 12))
 
     def _build_settings_body(self, card, close):
@@ -1560,7 +1568,7 @@ class SimAnalyticsApp:
         scale_row = ctk.CTkFrame(card, fg_color="transparent")
         scale_row.pack(fill="x")
         theme.body_label(scale_row, "Display scale",
-                         color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
+                         color=Colors.TEXT_PRIMARY, font=theme.font("label")).pack(side="left", padx=(0, 24))
         SingleSelectDropdown(
             scale_row, settings_mod.UI_SCALE_OPTIONS, self.settings_ui_scale,
             on_change=self._apply_ui_scale_setting, accent=Colors.INFO, width=110,
@@ -1568,13 +1576,13 @@ class SimAnalyticsApp:
         theme.body_label(card, "Sizes the whole app up or down. “Auto” fits your "
                          "display — smaller on a compact laptop, larger on a big monitor "
                          "or TV. Pick a percentage to override it.", color=Colors.TEXT_MUTED,
-                         font=theme.font("caption"), wraplength=300, justify="left").pack(
+                         font=theme.font("caption"), wraplength=380, justify="left").pack(
             anchor="w", pady=(6, 12))
 
         units_row = ctk.CTkFrame(card, fg_color="transparent")
         units_row.pack(fill="x")
         theme.body_label(units_row, "Distance units",
-                         color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
+                         color=Colors.TEXT_PRIMARY, font=theme.font("label")).pack(side="left", padx=(0, 24))
         SingleSelectDropdown(
             units_row, units_mod.UNIT_OPTIONS, self.settings_units,
             on_change=self._apply_units_setting, accent=Colors.INFO, width=110,
@@ -1582,26 +1590,26 @@ class SimAnalyticsApp:
         theme.body_label(card, "Show carry, total and offline distances in yards or "
                          "meters. Display only — your saved data and any community "
                          "contribution stay in yards.", color=Colors.TEXT_MUTED,
-                         font=theme.font("caption"), wraplength=300, justify="left").pack(
+                         font=theme.font("caption"), wraplength=380, justify="left").pack(
             anchor="w", pady=(6, 12))
 
         row = ctk.CTkFrame(card, fg_color="transparent")
         row.pack(fill="x")
         theme.body_label(row, "Temperature normalization",
-                         color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
+                         color=Colors.TEXT_PRIMARY, font=theme.font("label")).pack(side="left", padx=(0, 24))
         theme.toggle_switch(
             row, accent=Colors.INFO, text="", variable=self.settings_temp_norm_enabled,
             command=self._apply_settings, onvalue=True, offvalue=False,
         ).pack(side="right")
         theme.body_label(card, "Shows a “Today's Temp” box in the top bar to normalize "
                          "distances to standard conditions.", color=Colors.TEXT_MUTED,
-                         font=theme.font("caption"), wraplength=300, justify="left").pack(
+                         font=theme.font("caption"), wraplength=380, justify="left").pack(
             anchor="w", pady=(6, 12))
 
         row2 = ctk.CTkFrame(card, fg_color="transparent")
         row2.pack(fill="x")
         theme.body_label(row2, "Ignore warm-up shots",
-                         color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
+                         color=Colors.TEXT_PRIMARY, font=theme.font("label")).pack(side="left", padx=(0, 24))
         SingleSelectDropdown(
             row2, filters_mod.WARMUP_MODE_OPTIONS, self.settings_warmup_mode,
             on_change=self._apply_settings, accent=Colors.INFO, width=190,
@@ -1611,12 +1619,12 @@ class SimAnalyticsApp:
                          "every club (for mixed-club bags). Records and totals still "
                          "count every shot.",
                          color=Colors.TEXT_MUTED, font=theme.font("caption"),
-                         wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
+                         wraplength=380, justify="left").pack(anchor="w", pady=(6, 12))
 
         row3 = ctk.CTkFrame(card, fg_color="transparent")
         row3.pack(fill="x")
         theme.body_label(row3, "Use sample data (demo)",
-                         color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
+                         color=Colors.TEXT_PRIMARY, font=theme.font("label")).pack(side="left", padx=(0, 24))
         theme.toggle_switch(
             row3, accent=Colors.WARNING, text="", variable=self.settings_use_sample,
             command=self._apply_sample_toggle, onvalue=True, offvalue=False,
@@ -1624,14 +1632,14 @@ class SimAnalyticsApp:
         theme.body_label(card, "Shows the generated demo sessions instead of your real "
                          "data. Your data is untouched — toggle off to return to it.",
                          color=Colors.TEXT_MUTED, font=theme.font("caption"),
-                         wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
+                         wraplength=380, justify="left").pack(anchor="w", pady=(6, 12))
 
         # Which demo dataset to show (only meaningful while the toggle above
         # is on; changing it while on swaps datasets immediately).
         row3b = ctk.CTkFrame(card, fg_color="transparent")
         row3b.pack(fill="x")
         theme.body_label(row3b, "Sample dataset",
-                         color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
+                         color=Colors.TEXT_PRIMARY, font=theme.font("label")).pack(side="left", padx=(0, 24))
         SingleSelectDropdown(
             row3b, list(config.SAMPLE_DATASETS), self.settings_sample_set,
             on_change=self._apply_sample_set, accent=Colors.WARNING, width=190,
@@ -1639,7 +1647,7 @@ class SimAnalyticsApp:
         theme.body_label(card, "Baseline: a decent player's 6 months. 2-Year "
                          "Progression: a beginner's speed journey from 95 to 130 mph.",
                          color=Colors.TEXT_MUTED, font=theme.font("caption"),
-                         wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
+                         wraplength=380, justify="left").pack(anchor="w", pady=(6, 12))
 
         theme.divider(card).pack(fill="x", pady=(0, 10))
         theme.section_label(card, "On-course play", color=Colors.WARNING).pack(
@@ -1648,7 +1656,8 @@ class SimAnalyticsApp:
         row4 = ctk.CTkFrame(card, fg_color="transparent")
         row4.pack(fill="x")
         theme.body_label(row4, "Keep on-course rounds out of practice data",
-                         color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
+                         color=Colors.TEXT_PRIMARY, font=theme.font("label"),
+                         wraplength=290, justify="left").pack(side="left", padx=(0, 24))
         theme.toggle_switch(
             row4, accent=Colors.WARNING, text="", variable=self.settings_exclude_on_course,
             command=self._apply_on_course_settings, onvalue=True, offvalue=False,
@@ -1657,7 +1666,7 @@ class SimAnalyticsApp:
                          "the practice dashboards so it doesn't taint the swing data you're "
                          "trying to pure. On-course rounds are still saved.",
                          color=Colors.TEXT_MUTED, font=theme.font("caption"),
-                         wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
+                         wraplength=380, justify="left").pack(anchor="w", pady=(6, 12))
 
         # ---- GSPro connection (live-tracking source folder) ----
         theme.divider(card).pack(fill="x", pady=(0, 10))
@@ -1666,11 +1675,11 @@ class SimAnalyticsApp:
 
         gspro_path_lbl = theme.body_label(
             card, str(self._gspro_data_dir()), color=Colors.TEXT_PRIMARY,
-            font=theme.font("caption"), wraplength=300, justify="left", anchor="w")
+            font=theme.font("caption"), wraplength=380, justify="left", anchor="w")
         gspro_path_lbl.pack(anchor="w")
 
         self._gspro_status_label = theme.body_label(
-            card, "", font=theme.font("caption"), wraplength=300, justify="left", anchor="w")
+            card, "", font=theme.font("caption"), wraplength=380, justify="left", anchor="w")
         self._gspro_status_label.pack(anchor="w", pady=(4, 6))
         self._refresh_gspro_status_label()
 
@@ -1703,7 +1712,7 @@ class SimAnalyticsApp:
                          "(AppData\\LocalLow\\GSPro\\GSPro), not where GSPro is installed. "
                          "Only change it if the status above says it wasn't found.",
                          color=Colors.TEXT_MUTED, font=theme.font("caption"),
-                         wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
+                         wraplength=380, justify="left").pack(anchor="w", pady=(6, 12))
 
         # "Manage sessions…" used to live here. It's an action on your data, not
         # a preference, so it moved to the Data menu with Import and Contribute.

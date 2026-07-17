@@ -111,18 +111,37 @@ def test_short_panel_hugs_content_and_does_not_scroll(make_panel):
     assert p._popup.winfo_height() < 150
 
 
-def test_tall_panel_fills_to_window_bottom_then_scrolls(make_panel, root):
-    """Tall content extends to near the bottom edge of the app window — not the
-    screen — and only then scrolls."""
+def test_tall_panel_caps_at_two_thirds_and_scrolls(make_panel, root):
+    """Tall content stops at ~2/3 of the window height and scrolls from there —
+    a full-height drape reads as a page, not a menu."""
     p = make_panel(n_rows=60)
     content = p._content.winfo_reqheight()
-    window_bottom = root.winfo_rooty() + root.winfo_height()
+    cap_bottom = (root.winfo_rooty()
+                  + int(root.winfo_height() * DropdownPanel._MAX_FRACTION))
     panel_bottom = p._popup.winfo_rooty() + p._popup.winfo_height()
 
     assert content > _viewport(p), "content this tall must scroll"
-    assert panel_bottom <= window_bottom, "panel must not hang past the window"
-    # ...but it should use nearly all of the room it has, not a 200px default.
-    assert window_bottom - panel_bottom <= DropdownPanel._MARGIN_BOTTOM + 2
+    assert panel_bottom <= cap_bottom, "panel must respect the 2/3 cap"
+    # ...but it should use nearly all of the room under the cap, not a
+    # 200px default.
+    assert cap_bottom - panel_bottom <= DropdownPanel._MARGIN_BOTTOM + 4
+
+
+def test_minimizing_the_window_closes_the_panel(make_panel, root):
+    """The panel is an overrideredirect+topmost toplevel the window manager
+    doesn't tie to the app — minimizing must not leave it floating over other
+    applications."""
+    p = make_panel(n_rows=3)
+    assert p.is_open()
+    try:
+        root.withdraw()   # fires <Unmap> on the root, like minimizing does
+        root.update()
+        assert not p.is_open(), "panel must close when the app is hidden"
+    finally:
+        root.deiconify()
+        for _ in range(5):
+            root.update()
+            time.sleep(0.02)
 
 
 def test_panel_height_tracks_content_not_scrollframe_default(make_panel):
