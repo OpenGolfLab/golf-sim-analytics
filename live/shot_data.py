@@ -60,6 +60,10 @@ def flatten_shot(raw_shot: dict, club_lookup=None) -> dict:
     club_index = raw_shot.get("ClubIndex")
     club = normalize_club_name(resolve_club_index(club_index))
 
+    # currentRound.dat is GSPro's fixed internal store — always yards, no unit
+    # marker (GSPro localizes to metric only when it formats a CSV export, not
+    # here; see data/units.py). So live-tracked distances need no unit detection,
+    # unlike CSV ingest (data.io._detect_csv_distance_unit).
     carry = gd.get("cy")  # carry yardage
     az = gd.get("az")  # side/azimuth angle in degrees (GSPro's HLA equivalent)
     # Approximation: real launch-monitor CSVs report a measured "offline"
@@ -127,11 +131,18 @@ def archive_round(
     raw_archive_dir: Path,
     finalized_at: datetime | None = None,
     club_lookup=None,
+    lm_info: dict | None = None,
 ) -> dict:
     """Archive one finished round: a flattened Parquet file (joins every
     other archived session in every dashboard) plus a raw JSON snapshot
     with every field GSPro wrote. Returns a small summary dict for the
     caller's UI toast/refresh.
+
+    ``lm_info`` (from live.lm_detect.detect_lm) stamps the launch monitor
+    GSPro actually reported — session-level columns used only to
+    cross-check the contribute dialog's claimed monitor (see
+    contribute.verification_block). None/{} just leaves the columns out,
+    exactly like every pre-existing archive.
     """
     finalized_at = finalized_at or datetime.now()
     round_type = round_type_for(raw_shots)
@@ -142,6 +153,9 @@ def archive_round(
     df["session_date"] = finalized_at
     df["session_id"] = session_id
     df["round_type"] = round_type
+    if lm_info and lm_info.get("connect_type"):
+        df["lm_connect_type"] = lm_info["connect_type"]
+        df["lm_type_code"] = lm_info.get("lm_type_code") or None
 
     parquet_path = data_dir / f"{session_id}.parquet"
     df.to_parquet(parquet_path, engine="pyarrow", index=False)

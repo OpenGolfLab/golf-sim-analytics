@@ -43,6 +43,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from live.lm_detect import detect_lm
 from live.shot_data import archive_round, flatten_shot
 
 log = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class LiveRoundWatcher:
         schedule_on_main_thread: Callable[[Callable[[], None]], None] | None = None,
         poll_interval: float = 2.0,
         club_lookup=None,
+        lm_log_dir: Path | None = None,
     ):
         self.round_file = round_file
         self.data_dir = data_dir
@@ -70,6 +72,12 @@ class LiveRoundWatcher:
         # Optional live.gspro_db.ClubDataLookup — enriches shots with the club
         # speed / smash / AoA currentRound.dat lacks (see live/gspro_db.py).
         self.club_lookup = club_lookup
+        # Where GSPro's Unity Player.log lives (normally the same folder as
+        # round_file). At finalize time the newest "LM Type" line in it names
+        # the connected launch monitor — stamped onto the archived session so
+        # contribute.verification_block can cross-check the user's claimed
+        # monitor. None disables detection.
+        self.lm_log_dir = lm_log_dir
 
         self._first_shot_id = None
         self._seen_shot_ids: set = set()
@@ -202,11 +210,16 @@ class LiveRoundWatcher:
         except OSError:
             log.exception("Failed to persist live round watcher archive state")
 
-    def _finalize_buffer(self) -> None:
+    def _finalize_buffer(self) -> dict | None:
+        """Archive the current buffer if there's anything new to archive.
+        Returns the archive-summary dict (same shape as archive_round's) when
+        a round was actually written, or None when there was nothing to do
+        (empty buffer, or this exact file state was already archived)."""
         if not self._buffer or self._already_archived_current:
-            return
+            return None
+        lm_info = detect_lm(self.lm_log_dir) if self.lm_log_dir else {}
         info = archive_round(self._buffer, self.data_dir, self.raw_archive_dir,
-                             club_lookup=self.club_lookup)
+                             club_lookup=self.club_lookup, lm_info=lm_info)
         self._already_archived_current = True
         self._last_archived_mtime = self._last_mtime
         self._persist_last_archived_mtime()
@@ -219,11 +232,22 @@ class LiveRoundWatcher:
                 self.schedule_on_main_thread(lambda i=info: self.on_round_archived(i))
             else:
                 self.on_round_archived(info)
+        return info
 
-    def finalize_now(self) -> None:
-        """Best-effort flush of whatever's currently buffered — call this
-        on app shutdown so an in-progress round isn't lost if GSPro is
-        still running when this app closes.
+    def finalize_now(self) -> dict | None:
+        """Best-effort flush of whatever's currently buffered — call this on
+        app shutdown, or from an explicit "End Round" action, so a finished
+        round is archived (and shows up in the historical dashboards +
+        contribution) without waiting for GSPro to start the next round or the
+        app to close.
+
+        Returns the archive-summary dict when a round was written, or None
+        when there was nothing new to archive. Safe to call repeatedly: the
+        ``_already_archived_current`` guard means a second call (e.g. an
+        explicit End Round followed by app shutdown) never double-archives the
+        same round, and a genuinely new GSPro round still archives normally
+        because the round-boundary path resets that guard.
         """
-        self._finalize_buffer()
+        info = self._finalize_buffer()
         self._buffer = []
+        return info

@@ -22,6 +22,7 @@
 | Club Fitting | Club Comparison (adapter A/B testing with live capture) |
 | Speed Training | Cruising speed, fatigue curve, speed vs. strike quality, long-term progression |
 | On-Course | Automatic scorecards — holes, birdies, scoring breakdown, longest drives |
+| Community | Anonymized shots shared by the OpenGolfLab community, dispersion + per-club averages, filterable by club |
 | Live | Real-time dispersion for the round in progress |
 
 ![Dispersion with per-shot diagnostics](docs/screenshots/dispersion.jpg)
@@ -49,21 +50,23 @@ That's it. On first launch the app creates its data folders (`raw_csvs/`, `parqu
 
 1. **Automatic Desktop pickup** — hit *Export CSV* in GSPro's Practice Range; the app copies it off the Desktop (your file is never moved or deleted), ingests it, and refreshes. Non-GSPro CSVs on the Desktop are ignored.
 2. **Live tracking** — with GSPro running, shots are tracked continuously from GSPro's round file, enriched with club data from GSPro's own database, and archived automatically when the round ends. If a CSV export of the same round shows up later, it's reconciled into the live-tracked session instead of duplicating it.
-3. **Manual drop** — any GSPro CSV placed in `raw_csvs/` is ingested within seconds.
+3. **Manual import** — click **Import CSV** in the top bar (multi-select), or drag-and-drop CSV files straight onto the window. Any GSPro CSV placed in `raw_csvs/` by hand is also ingested within seconds.
+
+Units are yards by default; switch to meters under **⚙ Settings → Distance units** (display-only — your stored data stays in yards). Sharing to OpenGolfLab is opt-in and per-round: the **Contribute Data** panel lets you pick exactly which sessions to send.
 
 ## Building for distribution
 
 Two options, both Windows-only and requiring nothing on the end user's machine — no Python, no command line:
 
-**Windows installer (recommended)** — a normal double-click setup wizard (Next → Next → Finish), with a Start Menu shortcut, an optional Desktop icon, and a clean entry in *Add or Remove Programs*.
+**One-click installer (recommended)** — a single download that installs itself, no wizard involved: double-click, a short progress bar runs, the app launches. There's no Welcome/Choose Folder/Ready/Finished screens to click through — same one-click feel as installing Discord, Slack, or Chrome.
 
 ```
 build_installer.bat
 ```
 
-Needs [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`) in addition to Python. It builds the exe (see below) and compiles `installer/GolfSimAnalytics.iss` into `installer/Output/GolfSimAnalytics-Setup.exe` — that one file is everything you hand to a user. It installs **per-user** into `%LocalAppData%\GolfSimAnalytics` (no admin rights, no UAC prompt) — required by this app's data-storage design, since it keeps `raw_csvs/`, `parquet_data/`, and `logs/` next to its own exe, and that location has to be writable without elevation. Uninstalling removes everything the installer shipped; any data the user generated (their real shot history) is left alone.
+Needs [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`) in addition to Python. It builds the exe (see below) and compiles `installer/GolfSimAnalytics.iss` into `installer/Output/GolfSimAnalytics-Setup.exe` — that one file is everything you hand to a user. It installs **per-user** into `%LocalAppData%\GolfSimAnalytics` (no admin rights, no UAC prompt) — required by this app's data-storage design, since it keeps `raw_csvs/`, `parquet_data/`, and `logs/` next to its own exe, and that location has to be writable without elevation. It always creates a Start Menu shortcut and a Desktop icon, and leaves a clean entry in *Add or Remove Programs*. Uninstalling removes everything the installer shipped; any data the user generated (their real shot history) is left alone.
 
-**Portable folder** — no installer, just a folder to unzip and run.
+**Portable folder** — no installer at all, just a folder to unzip and run. Useful for testing or for users who'd rather not install anything.
 
 ```
 build_exe.bat

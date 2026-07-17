@@ -13,6 +13,7 @@ import pandas as pd
 from matplotlib.patches import FancyBboxPatch
 
 from config import Colors, get_club_color, get_club_rank
+from data import units as units_mod
 from data.columns import CARRY_ALIASES, TOTAL_ALIASES, find_col
 from ui.charts._shared import club_legend, style_axes
 from ui.empty_state import show_message
@@ -61,13 +62,13 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     style_axes(ax, font_scale, grid="y")
     ax.set_title(f"{int(bottom.sum()):,} shots · {len(days)} days practiced",
                  fontsize=font_scale - 1, color=Colors.TEXT_MUTED, pad=6)
-    if config.get("num_plots", 1) < 3:
-        club_legend(ax, club_colors, clubs, font_scale, loc="upper left")
+    club_legend(ax, club_colors, clubs, font_scale, loc="upper left")
 
-    _draw_tiles(ax_tiles, df, counts, len(days), font_scale)
+    _draw_tiles(ax_tiles, df, counts, len(days), font_scale,
+                extra.get("units", units_mod.YARDS))
 
 
-def _draw_tiles(ax, df, counts, n_days, font_scale):
+def _draw_tiles(ax, df, counts, n_days, font_scale, unit=units_mod.YARDS):
     ax.set_axis_off()
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
@@ -87,14 +88,17 @@ def _draw_tiles(ax, df, counts, n_days, font_scale):
     dr_carry = _dr_stat(carry_col, "mean")
     longest = _dr_stat(total_col, "max")
     sessions = df["session_id"].nunique() if "session_id" in df.columns else n_days
+    u = units_mod.dist_suffix_lower(unit)
+    dr_carry = units_mod.to_display(dr_carry, unit) if dr_carry else dr_carry
+    longest = units_mod.to_display(longest, unit) if longest else longest
 
     tiles = [
         ("Total shots", f"{len(df):,}", Colors.TEXT_ACTIVE),
         ("Sessions", f"{sessions}", Colors.TEXT_ACTIVE),
         ("Days practiced", f"{n_days}", Colors.TEXT_ACTIVE),
         ("Most-hit club", most_club, get_club_color(most_club)),
-        ("Avg driver carry", f"{dr_carry:.0f} yds" if dr_carry else "—", get_club_color("Dr")),
-        ("Longest drive", f"{longest:.0f} yds" if longest else "—", Colors.SUCCESS),
+        ("Avg driver carry", f"{dr_carry:.0f} {u}" if dr_carry else "—", get_club_color("Dr")),
+        ("Longest drive", f"{longest:.0f} {u}" if longest else "—", Colors.SUCCESS),
     ]
 
     n = len(tiles)

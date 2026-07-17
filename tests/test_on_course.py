@@ -45,6 +45,27 @@ def test_on_course_view_selects_only_course_rounds():
     assert (out["round_type"] == "on_course").all()
 
 
+def test_exclude_putts_drops_only_putter_rows():
+    df = pd.DataFrame({"club": ["Dr", "Putter", "7I", "Putter"]})
+    out = on_course.exclude_putts(df)
+    assert list(out["club"]) == ["Dr", "7I"]
+
+
+def test_exclude_putts_noop_without_club_column():
+    df = pd.DataFrame({"carry": [200.0, 150.0]})
+    assert len(on_course.exclude_putts(df)) == 2
+
+
+def test_scorecard_counts_putts_as_strokes():
+    # A par-4 played driver, wedge, then two putts = 4 strokes. The putts MUST
+    # count (that's why exclude_putts is not applied to the scorecard's source).
+    df = _hole("s", 0, 4, [280.0, 20.0, 3.0, 0.0],
+               clubs=["Dr", "Pw", "Putter", "Putter"])
+    holes = on_course.hole_summary(df)
+    assert int(holes.loc[0, "strokes"]) == 4
+    assert int(holes.loc[0, "to_par"]) == 0
+
+
 # --- scoring -----------------------------------------------------------------
 
 def _hole(session, hole, par, distances, clubs=None):

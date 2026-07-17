@@ -1,6 +1,9 @@
 import pandas as pd
 
-from data.io import extract_date_from_filename, ingest_csv_to_parquet, parse_and_clean_csv
+from data.io import (
+    extract_date_from_filename, import_csv_files, ingest_csv_to_parquet,
+    parse_and_clean_csv,
+)
 
 SAMPLE_CSV = """Club,Club Speed,Carry,Offline,SmashFactor
 Dr,105.2,255.4,4.1,1.48
@@ -135,3 +138,55 @@ def test_ingest_csv_to_parquet_merges_into_matching_live_round_instead_of_duplic
     # Live-only context untouched by the merge.
     assert list(merged["hole"]) == [0, 0]
     assert merged["session_id"].iloc[0] == "live-01-01-26-10-00-00-practice"
+
+
+def test_import_csv_files_copies_shot_exports_and_skips_junk(tmp_path):
+    raw = tmp_path / "raw_csvs"
+    good = tmp_path / "range.csv"
+    good.write_text(SAMPLE_CSV)  # has club + carry columns
+    junk = tmp_path / "budget.csv"
+    junk.write_text("date,amount,memo\n2026-01-01,42,coffee\n")
+
+    copied, skipped = import_csv_files([good, junk], raw)
+
+    assert [p.name for p in copied] == ["range.csv"]
+    assert [p.name for p in skipped] == ["budget.csv"]
+    assert (raw / "range.csv").exists()
+
+
+def test_import_csv_files_avoids_name_collisions(tmp_path):
+    raw = tmp_path / "raw_csvs"
+    raw.mkdir()
+    (raw / "range.csv").write_text("already here")
+    src = tmp_path / "range.csv"
+    src.write_text(SAMPLE_CSV)
+
+    copied, _ = import_csv_files([src], raw)
+
+    # The existing range.csv isn't clobbered — the import lands under a new name.
+    assert copied and copied[0].name != "range.csv"
+    assert (raw / "range.csv").read_text() == "already here"
+
+
+def test_detects_yards_export_and_leaves_distances_unchanged(tmp_path):
+    from data.io import _detect_csv_distance_unit
+    csv = tmp_path / "y.csv"
+    csv.write_text("Club,Club Speed,Carry,DistanceToPin,SmashFactor\n"
+                   "Dr,105,255.0,345.21 yds,1.48\n")
+    df = parse_and_clean_csv(csv)
+    import pandas as pd
+    raw = pd.read_csv(csv); raw.columns = [c.lower().replace(" ", "_") for c in raw.columns]
+    assert _detect_csv_distance_unit(raw) == "yards"
+    assert round(df["carry"].iloc[0], 1) == 255.0  # untouched
+
+
+def test_metric_export_is_normalized_to_yards_at_ingest(tmp_path):
+    # A metric GSPro export (DistanceToPin suffixed " m") must be converted to
+    # the canonical yards on the way in, so stored data is one unit regardless
+    # of each user's GSPro metric/imperial setting.
+    csv = tmp_path / "m.csv"
+    csv.write_text("Club,Club Speed,Carry,PeakHeight,DistanceToPin,SmashFactor\n"
+                   "Dr,50,250.0,30.0,120.5 m,1.44\n")
+    df = parse_and_clean_csv(csv)
+    assert round(df["carry"].iloc[0], 1) == 273.4    # 250 m -> yards
+    assert round(df["peakheight"].iloc[0], 1) == 98.4  # 30 m -> feet

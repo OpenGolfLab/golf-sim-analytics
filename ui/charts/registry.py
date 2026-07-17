@@ -16,6 +16,7 @@ from typing import Callable
 
 from ui.charts import (
     club_compare,
+    community,
     dispersion,
     efficiency,
     gapping,
@@ -113,6 +114,7 @@ DASHBOARDS: list[DashboardDef] = [
         shot_timeline,
         shot_shape,
         on_course_dashboard,
+        community,
         # Category "Live" is deliberately excluded from
         # app_window._build_sidebar_sections()'s loop — it's toggled by the
         # dedicated "Go Live" top-bar button instead of a sidebar checkbox,
@@ -122,4 +124,5 @@ DASHBOARDS: list[DashboardDef] = [
     )
 ]
 
-CATEGORIES = ["Metrics", "Optimization", "Club Fitting", "Speed Training", "On Course", "Live"]
+CATEGORIES = ["Metrics", "Optimization", "Club Fitting", "Speed Training", "On Course",
+              "Community", "Live"]

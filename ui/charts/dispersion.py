@@ -15,6 +15,7 @@ import seaborn as sns
 from matplotlib.colors import LinearSegmentedColormap, to_rgba
 
 from config import Colors, get_club_rank
+from data import units as units_mod
 from data.columns import (
     BALL_SPEED_ALIASES, CARRY_ALIASES, OFFLINE_ALIASES, TOTAL_ALIASES, find_col,
 )
@@ -34,6 +35,9 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     if df.empty:
         show_message(fig, "No data matching filters", font_scale)
         return
+    unit = extra.get("units", units_mod.YARDS)
+    df = units_mod.to_display_frame(df, unit)
+    u = units_mod.dist_suffix_lower(unit)  # tooltip suffix ("yds"/"m")
     ax = fig.add_subplot(111)
     color_pref = config["color_var"].get()
     dist_pref = config.get("dist_var").get() if "dist_var" in config else "Carry"
@@ -51,10 +55,10 @@ def render(fig, df, club_colors, font_scale, config, **extra):
         order = sorted(df["club"].dropna().unique(), key=get_club_rank)
         if detail == "Simple":
             _render_simple(ax, df, club_colors, font_scale, order, offline_col, y_col,
-                           dist_pref, config)
+                           dist_pref, config, u)
         else:
             _render_indepth(fig, ax, df, club_colors, font_scale, order, offline_col, y_col,
-                            dist_pref, color_pref, config)
+                            dist_pref, color_pref, config, u)
 
         max_offline = df[offline_col].abs().max()
         limit = max(max_offline * 1.2, 25)
@@ -74,13 +78,13 @@ def render(fig, df, club_colors, font_scale, config, **extra):
                 ax.axhline(y=yd, color=Colors.GRID, linestyle="-", linewidth=0.8, alpha=0.5, zorder=0.1)
         ax.set_yticks(range(y_start, y_end + 25, 25))
 
-    ax.set_xlabel("Offline (Yards)", fontsize=font_scale)
-    ax.set_ylabel(f"{dist_pref} (Yards)", fontsize=font_scale)
+    ax.set_xlabel(f"Offline ({units_mod.dist_suffix(unit)})", fontsize=font_scale)
+    ax.set_ylabel(f"{dist_pref} ({units_mod.dist_suffix(unit)})", fontsize=font_scale)
     style_axes(ax, font_scale, grid=None)
     ax.grid(axis="x", linestyle=":", alpha=0.3, zorder=0)
 
 
-def _render_simple(ax, df, club_colors, font_scale, order, offline_col, y_col, dist_pref, config):
+def _render_simple(ax, df, club_colors, font_scale, order, offline_col, y_col, dist_pref, config, u="yds"):
     """Each club as a single mean marker with std whiskers."""
     means = []
     for club in order:
@@ -101,7 +105,7 @@ def _render_simple(ax, df, club_colors, font_scale, order, offline_col, y_col, d
                     edgecolor="black", linewidth=0.8, zorder=3)
 
     def _tooltip(row):
-        return f"{row['club']}\nMean {dist_pref}: {row['y']:.0f} yds\nMean offline: {row['x']:+.1f} yds\n{int(row['n'])} shots"
+        return f"{row['club']}\nMean {dist_pref}: {row['y']:.0f} {u}\nMean offline: {row['x']:+.1f} {u}\n{int(row['n'])} shots"
 
     attach_hover_tooltip(ax.figure, sc, mdf, _tooltip, font_scale)
     if config.get("num_plots", 1) == 1:
@@ -109,7 +113,7 @@ def _render_simple(ax, df, club_colors, font_scale, order, offline_col, y_col, d
 
 
 def _render_indepth(fig, ax, df, club_colors, font_scale, order, offline_col, y_col,
-                    dist_pref, color_pref, config):
+                    dist_pref, color_pref, config, u="yds"):
     """Per-club KDE + scatter."""
     for club in order:
         club_data = df[df["club"] == club]
@@ -136,8 +140,8 @@ def _render_indepth(fig, ax, df, club_colors, font_scale, order, offline_col, y_
     def _tooltip(row):
         lines = [
             str(row["club"]),
-            f"{dist_pref}: {row[y_col]:.0f} yds",
-            f"Offline: {row[offline_col]:+.1f} yds",
+            f"{dist_pref}: {row[y_col]:.0f} {u}",
+            f"Offline: {row[offline_col]:+.1f} {u}",
         ]
         if bs_col and pd.notna(row.get(bs_col)):
             lines.append(f"Ball speed: {row[bs_col]:.0f} mph")

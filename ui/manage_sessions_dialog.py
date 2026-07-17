@@ -1,7 +1,8 @@
-"""Manage Sessions dialog — soft-delete / restore whole sessions.
+"""Manage Sessions panel — soft-delete / restore whole sessions.
 
 Reversible: deleting hides a session everywhere (via data/edits.py); restoring
-brings it back. The archived Parquet is never touched.
+brings it back. The archived Parquet is never touched. Rendered as a drop-down
+panel body (see ui.components.DropdownPanel), not a floating window.
 """
 from __future__ import annotations
 
@@ -11,31 +12,23 @@ from config import Colors
 from ui import theme
 
 
-def open_manage_sessions_dialog(root, sessions, on_toggle):
-    """sessions: list of (session_id, label, is_deleted), newest first.
-    on_toggle(session_id, delete: bool) persists the change."""
-    win = ctk.CTkToplevel(root)
-    win.title("Manage Sessions")
-    win.configure(fg_color=Colors.BG_SURFACE)
-    win.transient(root)
-    win.geometry(f"460x560+{root.winfo_rootx() + 200}+{root.winfo_rooty() + 120}")
+def build_manage_sessions_body(card, close, sessions, on_toggle):
+    """Fill the Manage Sessions dropdown panel.
 
-    card = theme.card_frame(win)
-    card.pack(fill="both", expand=True, padx=14, pady=14)
+    ``card`` is an already-scrollable body; ``close`` dismisses the panel.
+    sessions: list of (session_id, label, is_deleted), newest first.
+    on_toggle(session_id, delete: bool) persists the change."""
     theme.section_label(card, "Sessions", color=Colors.INFO).pack(anchor="w", pady=(2, 2))
     theme.body_label(card, "Deleting hides a session everywhere — it's reversible "
                      "and never touches your files.", color=Colors.TEXT_MUTED,
                      font=theme.font("caption"), wraplength=410, justify="left").pack(
         anchor="w", pady=(0, 8))
 
-    scroll = ctk.CTkScrollableFrame(card, fg_color="transparent")
-    scroll.pack(fill="both", expand=True)
-
     if not sessions:
-        theme.body_label(scroll, "No sessions yet.", color=Colors.TEXT_MUTED).pack(pady=20)
+        theme.body_label(card, "No sessions yet.", color=Colors.TEXT_MUTED).pack(pady=20)
 
     for sid, label, is_deleted in sessions:
-        row = ctk.CTkFrame(scroll, fg_color=Colors.BG_HOVER, corner_radius=8)
+        row = ctk.CTkFrame(card, fg_color=Colors.BG_HOVER, corner_radius=8)
         row.pack(fill="x", pady=3)
         lbl = theme.body_label(row, label, color=Colors.TEXT_PRIMARY)
         lbl.pack(side="left", padx=12, pady=8)
@@ -58,6 +51,4 @@ def open_manage_sessions_dialog(root, sessions, on_toggle):
         btn.pack(side="right", padx=10, pady=6)
 
     theme.outline_button(card, accent=Colors.TEXT_MUTED, text="Close",
-                         command=win.destroy, width=100).pack(side="right", pady=(10, 0))
-    win.after(120, lambda: (win.winfo_exists() and (win.lift(), win.focus_force())))
-    return win
+                         command=close, width=100).pack(side="right", pady=(10, 0))

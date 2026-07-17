@@ -25,6 +25,12 @@ APP_VERSION = "1.0.0"
 OPENGOLFLAB_INTAKE_URL = "https://opengolflab-intake.etsmith1414.workers.dev"
 OPENGOLFLAB_INTAKE_KEY = ""
 
+# OpenGolfLab community *read* API — powers the Community dashboard (see
+# community.py + docs/COMMUNITY_API.md). This endpoint is separate from the
+# intake Worker above and does NOT exist yet; leave blank until the read
+# Worker/pool is deployed, and the dashboard shows an offline state.
+OPENGOLFLAB_COMMUNITY_URL = ""
+
 
 # ---------------------------------------------------------------------------
 # Base paths
@@ -101,11 +107,19 @@ RAW_CSV_POLL_SECONDS = 5.0
 # persistent-data convention (%USERPROFILE%\AppData\LocalLow\<Company>\
 # <Product>\), the same reasoning as EXPORT_WATCH_DIR above.
 # ---------------------------------------------------------------------------
-GSPRO_ROUND_FILE = Path.home() / "AppData" / "LocalLow" / "GSPro" / "GSPro" / "currentRound.dat"
+# GSPro's per-user Unity data folder — where GSPro writes currentRound.dat,
+# GSPro.db and Player.log. This is Unity's fixed persistent-data location
+# (AppData\LocalLow\<Company>\<Product>\), which is independent of where the
+# GSPro *executable* is installed, so it's the same for a standard install
+# regardless of install drive/folder. It can be overridden at runtime from
+# Settings for non-standard setups (a differently-branded build, a redirected
+# AppData profile) — see ui.app_window._gspro_data_dir; this is just the default.
+GSPRO_DEFAULT_DATA_DIR = Path.home() / "AppData" / "LocalLow" / "GSPro" / "GSPro"
+GSPRO_ROUND_FILE = GSPRO_DEFAULT_DATA_DIR / "currentRound.dat"
 # GSPro's SQLite DB in the same folder. Its DrivingRangeShot table logs each
 # range shot with the club data (ClubSpeed / SmashFactor / AoA) that
 # currentRound.dat strips out — read live to enrich live-tracked shots.
-GSPRO_DB_FILE = GSPRO_ROUND_FILE.parent / "GSPro.db"
+GSPRO_DB_FILE = GSPRO_DEFAULT_DATA_DIR / "GSPro.db"
 LIVE_POLL_SECONDS = 2.0
 
 # Full-fidelity raw JSON snapshot of every finalized live-tracked round
@@ -167,6 +181,7 @@ FONT_SCALE = {
     "body": 12,
     "label": 14,
     "subheading": 16,
+    "title": 19,      # chart-panel headers
     "heading": 20,
     "display": 28,
 }
@@ -257,6 +272,30 @@ CLUB_ORDER = {
 
 def get_club_rank(club_name) -> int:
     return CLUB_ORDER.get(normalize_club_name(club_name), 99)
+
+
+# The canonical bag: every real club this app knows how to place, color, and
+# fit. normalize_club_name() maps all real spellings onto one of these, so a
+# label that still isn't in here after normalization is junk — a spreadsheet
+# error ("#Div/0!", "#Ref!") or an unmapped launch-monitor slot ("Club8") — not
+# a real club.
+CANONICAL_CLUBS = frozenset(CLUB_ORDER)
+
+# The putter is deliberately NOT a CANONICAL (swing-analytics) club: on-course
+# putts have launch data copied from the preceding shot (GSPro generates no
+# real ball flight for a putt), so they'd poison every dispersion / gapping /
+# launch axis and inflate contributed shot counts. They ARE kept in the data
+# though (tagged "Putter"), because the on-course scorecard counts strokes as
+# shots-per-hole — dropping putts would mis-score every round. So this is a
+# recognized-but-non-swing label: store.py keeps these rows, and the swing
+# dashboards / contribution filter them out (see data.on_course.exclude_putts).
+PUTTER_CLUB = "Putter"
+NON_SWING_CLUBS = frozenset({PUTTER_CLUB})
+
+
+def is_bag_club(club_name) -> bool:
+    """True only for a label that resolves to a real club in the bag."""
+    return normalize_club_name(club_name) in CANONICAL_CLUBS
 
 
 # ---------------------------------------------------------------------------
@@ -375,10 +414,15 @@ CLUB_INDEX_MAP: dict[int, str] = {
     22: "Pw",
     23: "Gw",
     24: "Sw",
-    25: "Lw",  # lob wedge — confirmed from a live-tracked shot showing ClubIndex 25
-    26: "Lw",  # also the lob wedge — GSPro reports it under 26 on-course too
-               # (short-game shots ranging from tap-ins to ~115yd wedges),
-               # confirmed by the user against their on-course rounds
+    25: "Lw",       # lob wedge — confirmed from a live-tracked shot showing ClubIndex 25
+    26: PUTTER_CLUB,  # PUTTER — not a lob wedge (an earlier guess). On-course putts
+                      # log under ClubIndex 26 with ball data COPIED from the preceding
+                      # shot (a putter produces no launch-monitor ball flight), so their
+                      # carry/spin/ball-speed are meaningless. Verified across every
+                      # archived on-course round: ~all ClubIndex-26 records duplicate a
+                      # prior shot's numbers. Tagged "Putter" and excluded from swing
+                      # analytics + contribution, but kept so scorecards still count the
+                      # stroke (see config.NON_SWING_CLUBS, data.on_course.exclude_putts).
 }
 
 

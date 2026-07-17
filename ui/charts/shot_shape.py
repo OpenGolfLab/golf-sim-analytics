@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 from config import Colors
+from data import units as units_mod
 from data.columns import OFFLINE_ALIASES, SPIN_AXIS_ALIASES, START_DIR_ALIASES, find_col
 from ui.charts._shared import (
     attach_hover_tooltip, draw_color_square, square_point_colors, style_axes,
@@ -64,6 +65,10 @@ def render(fig, df, club_colors, font_scale, config, **extra):
                      tone="muted" if df.empty else "error")
         return
 
+    unit = extra.get("units", units_mod.YARDS)
+    df = units_mod.to_display_frame(df, unit)
+    u = units_mod.dist_suffix_lower(unit)
+
     d = df.dropna(subset=[start_col, curve_col]).copy()
     # Rows with no direction data at all are recorded as 0/0 by this monitor;
     # drop those so the plot isn't a fake pile on the origin.
@@ -103,7 +108,7 @@ def render(fig, df, club_colors, font_scale, config, **extra):
         lines.append(f"Start dir: {row[start_col]:+.1f}°")
         lines.append(f"Curve: {row[curve_col]:+.1f}°")
         if offline_col and pd.notna(row.get(offline_col)):
-            lines.append(f"Offline: {row[offline_col]:+.1f} yds")
+            lines.append(f"Offline: {row[offline_col]:+.1f} {u}")
         if "session_date" in row.index and pd.notna(row["session_date"]):
             lines.append(pd.to_datetime(row["session_date"]).strftime("%b %d, %Y"))
         return "\n".join(lines)

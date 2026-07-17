@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 import tkinter as tk
+from pathlib import Path
 from types import SimpleNamespace
 
 import customtkinter as ctk
@@ -45,6 +47,7 @@ import config
 from config import Colors, get_club_rank
 from data import filters as filters_mod
 from data import adapter_tags, edits as edits_mod, on_course, settings as settings_mod
+from data import units as units_mod
 from data.analytics import EnvironmentalNormalizer, ShotScorer
 from data.columns import BALL_SPEED_ALIASES, CLUB_SPEED_ALIASES, find_col
 from data.export_watcher import ExportWatcher
@@ -56,7 +59,7 @@ from live.gspro_db import ClubDataLookup
 from live.round_watcher import LiveRoundWatcher
 from ui import theme
 from ui.club_config_dialog import open_club_config_dialog
-from ui.manage_sessions_dialog import open_manage_sessions_dialog
+from ui.manage_sessions_dialog import build_manage_sessions_body
 from ui.shot_edit_popup import open_shot_edit_popup
 from ui.tooltip import attach_tooltip
 from ui.charts import session_compare
@@ -67,11 +70,12 @@ from ui.charts.speed_training import NAME as TRAINING_NAME
 from ui.charts.dispersion import NAME as DISPERSION_NAME
 from ui.charts.gapping import NAME as GAPPING_NAME
 from ui.charts.launch_spin import NAME as LAUNCH_SPIN_NAME
+from ui.charts.community import NAME as COMMUNITY_NAME
 from ui.charts.live_dispersion import NAME as LIVE_NAME
 from ui.charts.on_course_dashboard import NAME as ONCOURSE_NAME
 from ui.charts.registry import DASHBOARDS
 from ui.charts.trajectory import NAME as TRAJECTORY_NAME
-from ui.components import MultiSelectDropdown, SingleSelectDropdown
+from ui.components import DropdownPanel, MultiSelectDropdown, SingleSelectDropdown
 from ui.dialogs import show_toast
 from ui.empty_state import show_message
 from ui.home_page import build_home_page, course_banner
@@ -84,7 +88,7 @@ MAX_GRID_ROWS = 10  # generous upper bound used to fully reset row weights each 
 # "Solo" dashboards are dense, multi-panel composites that only read well
 # filling the whole screen, so they take over the grid alone (like Live) —
 # selecting one clears everything else, and they can't be paired with another.
-SOLO_DASHBOARDS = frozenset({TRAINING_NAME, CLUB_COMPARE_NAME, ONCOURSE_NAME})
+SOLO_DASHBOARDS = frozenset({TRAINING_NAME, CLUB_COMPARE_NAME, ONCOURSE_NAME, COMMUNITY_NAME})
 
 # Club Comparison "Now hitting" sentinel: not logging to any config.
 _CC_OFF = "Off"
@@ -100,7 +104,7 @@ CATEGORY_HEADER_COLOR = {
 
 # Panel-entry keys that belong to a chart figure and must be dropped when
 # the panel is destroyed.
-_PANEL_STATE_KEYS = ("panel", "fig", "canvas", "rendered_once", "bucket")
+_PANEL_STATE_KEYS = ("panel", "fig", "canvas", "rendered_once", "_rendered_sig")
 
 
 class SimAnalyticsApp:
@@ -117,6 +121,11 @@ class SimAnalyticsApp:
         # restart are backed by this.
         self._settings = settings_mod.load()
         self.settings_ui_scale = tk.StringVar(value=self._settings.get("ui_scale", "Auto"))
+        # Distance display unit (yards/meters) — display-only, persisted.
+        self.settings_units = tk.StringVar(value=self._settings.get("units", units_mod.YARDS))
+        # Optional override for GSPro's data folder (live tracking source);
+        # blank means use the standard auto-detected location.
+        self.settings_gspro_dir = tk.StringVar(value=self._settings.get("gspro_data_dir", ""))
         # On-course play handling (persisted).
         self.settings_exclude_on_course = tk.BooleanVar(
             value=self._settings.get("exclude_on_course_from_practice", True))
@@ -147,18 +156,16 @@ class SimAnalyticsApp:
         # _build_plot_state), so appending here is all the live panel
         # needs to pick up the next shot. Cleared once the round archives.
         self.live_shot_buffer: list[dict] = []
-        self.round_watcher = LiveRoundWatcher(
-            round_file=config.GSPRO_ROUND_FILE,
-            data_dir=config.DATA_DIR,
-            raw_archive_dir=config.LIVE_ROUNDS_RAW_DIR,
-            on_new_shot=self._on_new_live_shot,
-            on_round_archived=self._on_round_archived,
-            schedule_on_main_thread=lambda fn: self.root.after(0, fn),
-            poll_interval=config.LIVE_POLL_SECONDS,
-            # Enriches live/archived range shots with club speed, smash and AoA
-            # from GSPro.db (currentRound.dat doesn't carry them).
-            club_lookup=ClubDataLookup(config.GSPRO_DB_FILE),
-        )
+
+        # Community dashboard: shots fetched from the OpenGolfLab read API
+        # (community.py) are cached here after a one-time background fetch when
+        # the dashboard is first opened. _community_status drives the empty/
+        # offline/loading message the chart shows when there's nothing to plot.
+        self._community_df: pd.DataFrame | None = None
+        self._community_as_of = None
+        self._community_status = "offline"  # offline | loading | empty | ok
+        self._community_loading = False
+        self._build_round_watcher()
 
         self.global_time_var = tk.StringVar(value=filters_mod.TIME_ALL)
         self.global_quality_var = tk.StringVar(value=filters_mod.QUALITY_ALL)
@@ -169,9 +176,10 @@ class SimAnalyticsApp:
         self.settings_temp_norm_enabled = tk.BooleanVar(value=False)
         self.global_temp_var = tk.StringVar(value="")
         self._normalizer = EnvironmentalNormalizer()
-        # Ignore each session's first few shots (warm-up swings) in the
-        # dashboards — a Settings toggle, off by default.
-        self.settings_ignore_warmup = tk.BooleanVar(value=False)
+        # Which warm-up ("getting loose") shots to drop from the dashboards —
+        # a Settings dropdown (off / first 5 of session / first of each club),
+        # off by default. See data/filters.drop_warmup_shots.
+        self.settings_warmup_mode = tk.StringVar(value=filters_mod.WARMUP_OFF)
         # Demo mode: show a generated sample dataset instead of real data.
         # Which dataset is chosen from config.SAMPLE_DATASETS via a Settings
         # dropdown; both vars are in-memory-only by design (demo state
@@ -241,6 +249,7 @@ class SimAnalyticsApp:
         })
 
         self._build_ui()
+        self._register_csv_drop_target()
         self._apply_titlebar_theme()
         self.load_master_data()
         self.build_grid()
@@ -383,8 +392,12 @@ class SimAnalyticsApp:
             name = entry["def"].name
 
             # Picking any sidebar dashboard leaves live mode (it owns the grid).
+            # Leaving live is treated as "I'm done with this round", so finalize
+            # it now — that's what makes the just-tracked session render in the
+            # historical dashboard you're switching to, with no restart.
             if self.plot_state[LIVE_NAME]["var"].get():
                 self.plot_state[LIVE_NAME]["var"].set(False)
+                self._finalize_live_round(show_feedback=False)
                 self._update_go_live_button()
 
             # The checkbox has already flipped this entry's var; act on the new
@@ -430,6 +443,16 @@ class SimAnalyticsApp:
         going_on = not entry["var"].get()
         self.show_landing_page = False
 
+        # Turning live OFF is an intentional "done watching" signal — finalize
+        # the tracked round so it archives into history/contribution right away.
+        if not going_on:
+            self._finalize_live_round(show_feedback=False)
+        elif self._gspro_status()[0] != "ok":
+            # Going live but GSPro's data folder isn't where we're looking —
+            # say so, instead of showing a silently empty live panel.
+            show_toast(self.root, "GSPro data folder not found — set it in "
+                       "Settings → GSPro connection for live tracking.", tone="warning")
+
         # Live mode takes over the whole grid: only the Live Dispersion
         # panel is shown while it's on.
         for e in self.plot_state.values():
@@ -446,11 +469,228 @@ class SimAnalyticsApp:
             self.go_live_button.configure(text="Live: ON", fg_color=Colors.ACCENT, text_color=Colors.TEXT_ON_LIGHT)
         else:
             self.go_live_button.configure(text="Go Live", fg_color="transparent", text_color=Colors.ACCENT)
+        # "End Round" is only meaningful while watching a live round — hide it
+        # otherwise so it doesn't invite finalizing when nothing's in progress.
+        btn = getattr(self, "end_round_button", None)
+        if btn is not None:
+            if is_on:
+                btn.pack(side=tk.LEFT, padx=(0, 6), pady=12, after=self.go_live_button)
+            else:
+                btn.pack_forget()
+
+    def _finalize_live_round(self, *, show_feedback: bool = True) -> None:
+        """Archive the round currently being live-tracked, right now, so it
+        lands in the historical dashboards and the contribution picker without
+        waiting for GSPro to start a new round or the app to close (the "I have
+        to restart before my session shows up" complaint).
+
+        The heavy lifting — reload, rebuild, repaint, success toast — runs
+        through the existing on_round_archived callback that finalize_now()
+        fires when it actually writes a round. When there was nothing new to
+        archive we optionally say so, rather than leaving the click looking
+        like it did nothing.
+        """
+        try:
+            info = self.round_watcher.finalize_now()
+        except Exception:
+            log.exception("End Round: could not archive the in-progress round")
+            if show_feedback:
+                show_toast(self.root, "Couldn't archive the current round — see the log.",
+                           tone="warning")
+            return
+        if info is None and show_feedback:
+            show_toast(self.root, "No new shots to archive yet.", tone="warning")
+
+    # ------------------------------------------------------------------
+    # GSPro data folder (live-tracking source) — resolvable + re-pointable.
+    # ------------------------------------------------------------------
+    def _gspro_data_dir(self) -> Path:
+        """The GSPro per-user data folder live tracking reads from — the custom
+        override from Settings if set, else the standard auto-detected location.
+        This is GSPro's Unity persistent-data folder, NOT its install folder."""
+        custom = (self.settings_gspro_dir.get() or "").strip()
+        return Path(custom) if custom else config.GSPRO_DEFAULT_DATA_DIR
+
+    def _gspro_status(self):
+        """('ok' | 'empty' | 'missing', folder). 'ok' when the folder exists and
+        looks like GSPro's (has currentRound.dat or GSPro.db); 'empty' when the
+        folder exists but has neither (GSPro never ran, or wrong folder);
+        'missing' when the folder isn't there at all."""
+        d = self._gspro_data_dir()
+        try:
+            if not d.exists():
+                return "missing", d
+            if (d / "currentRound.dat").exists() or (d / "GSPro.db").exists():
+                return "ok", d
+            return "empty", d
+        except OSError:
+            return "missing", d
+
+    def _build_round_watcher(self):
+        """Construct self.round_watcher from the currently-resolved GSPro folder.
+        Split out so a Settings path change can rebuild it (see
+        _restart_round_watcher) without duplicating the wiring."""
+        gspro_dir = self._gspro_data_dir()
+        self.round_watcher = LiveRoundWatcher(
+            round_file=gspro_dir / "currentRound.dat",
+            data_dir=config.DATA_DIR,
+            raw_archive_dir=config.LIVE_ROUNDS_RAW_DIR,
+            on_new_shot=self._on_new_live_shot,
+            on_round_archived=self._on_round_archived,
+            schedule_on_main_thread=lambda fn: self.root.after(0, fn),
+            poll_interval=config.LIVE_POLL_SECONDS,
+            # Enriches live/archived range shots with club speed, smash and AoA
+            # from GSPro.db (currentRound.dat doesn't carry them).
+            club_lookup=ClubDataLookup(gspro_dir / "GSPro.db"),
+            # GSPro's Player.log names the connected launch monitor ("LM Type"
+            # line per shot) — stamped on archived sessions to cross-check the
+            # contribute dialog's claimed monitor (live/lm_detect.py).
+            lm_log_dir=gspro_dir,
+        )
+
+    def _restart_round_watcher(self):
+        """Re-point live tracking at a newly-chosen GSPro folder: flush the old
+        watcher's in-progress round (so nothing is lost), stop it, and start a
+        fresh one on the new paths."""
+        old = getattr(self, "round_watcher", None)
+        if old is not None:
+            try:
+                old.stop()
+                old.finalize_now()  # archive anything buffered before swapping
+            except Exception:
+                log.exception("Could not cleanly stop the old round watcher")
+        self._build_round_watcher()
+        self.round_watcher.start()
+
+    def _apply_gspro_dir(self):
+        """Persist the GSPro-folder override, re-point live tracking at it, and
+        refresh the Settings status line."""
+        settings_mod.set("gspro_data_dir", (self.settings_gspro_dir.get() or "").strip())
+        self._restart_round_watcher()
+        self._refresh_gspro_status_label()
+
+    def _refresh_gspro_status_label(self):
+        lbl = getattr(self, "_gspro_status_label", None)
+        if lbl is None or not lbl.winfo_exists():
+            return
+        status, _d = self._gspro_status()
+        if status == "ok":
+            lbl.configure(text="✓ GSPro data folder detected — live tracking is ready.",
+                          text_color=Colors.SUCCESS)
+        elif status == "empty":
+            lbl.configure(
+                text="⚠ Folder found, but no GSPro data in it yet. Launch GSPro and hit a "
+                     "shot, or pick the correct folder.", text_color=Colors.WARNING)
+        else:
+            lbl.configure(
+                text="⚠ Not found — live tracking is off until this points at GSPro's data folder.",
+                text_color=Colors.WARNING)
+
+    # ------------------------------------------------------------------
+    # Community dashboard data — fetched once, lazily, off the main thread.
+    # ------------------------------------------------------------------
+    def _ensure_community_data(self):
+        """Kick off a one-time background fetch of community shots the first
+        time the Community dashboard is shown. No-op once loaded/loading, or
+        when the read API isn't configured (the dashboard shows an offline
+        state then)."""
+        import community as community_mod
+        url = getattr(config, "OPENGOLFLAB_COMMUNITY_URL", "")
+        if not community_mod.is_configured(url):
+            self._community_status = "offline"
+            return
+        if self._community_df is not None or self._community_loading:
+            return
+        self._community_loading = True
+        self._community_status = "loading"
+
+        def _work():
+            try:
+                df = community_mod.fetch_community_shots(
+                    url, app_version=getattr(config, "APP_VERSION", ""))
+            except Exception:
+                log.exception("Community fetch failed")
+                df = pd.DataFrame()
+            self.root.after(0, lambda: self._on_community_loaded(df))
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_community_loaded(self, df):
+        self._community_loading = False
+        self._community_df = df if df is not None else pd.DataFrame()
+        self._community_status = "ok" if not self._community_df.empty else "empty"
+        # Repaint if the Community panel is the one on screen.
+        if self.plot_state[COMMUNITY_NAME]["var"].get():
+            self.update_single_plot(COMMUNITY_NAME, self._active_count())
 
     def _open_contribute(self):
-        """Open the OpenGolfLab contribution (opt-in data sharing) dialog."""
-        from ui.contribute_dialog import open_contribute_dialog
-        open_contribute_dialog(self.root)
+        """Drop the OpenGolfLab contribution panel down under its top-bar button."""
+        from ui.contribute_dialog import build_contribute_body
+        panel = getattr(self, "_contribute_panel", None)
+        if panel is None:
+            panel = DropdownPanel(self.contribute_button, build_contribute_body, width=430)
+            self._contribute_panel = panel
+        panel.toggle()
+
+    # ------------------------------------------------------------------
+    # CSV import — drag-and-drop onto the window, or a file picker. Both feed
+    # the same ingest pipeline the background raw_csvs/ poll uses.
+    # ------------------------------------------------------------------
+    def _open_import_dialog(self):
+        from tkinter import filedialog
+        paths = filedialog.askopenfilenames(
+            parent=self.root, title="Import launch-monitor CSV files",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if paths:
+            self._import_csv_paths(paths)
+
+    def _register_csv_drop_target(self):
+        """Accept .csv files dropped anywhere on the window (when tkinterdnd2
+        loaded — see app._create_root). Silently does nothing otherwise."""
+        if not getattr(self.root, "_dnd_enabled", False):
+            return
+        try:
+            from tkinterdnd2 import DND_FILES
+            self.root.drop_target_register(DND_FILES)
+            self.root.dnd_bind("<<Drop>>", self._on_files_dropped)
+        except Exception:
+            log.info("Could not register the CSV drop target", exc_info=True)
+
+    def _on_files_dropped(self, event):
+        # tkdnd hands over a single string of paths, brace-wrapped when a path
+        # contains spaces — splitlist parses exactly that Tcl-list form.
+        try:
+            paths = self.root.tk.splitlist(event.data)
+        except Exception:
+            paths = [p for p in str(event.data).split() if p]
+        csvs = [p for p in paths if str(p).lower().endswith(".csv")]
+        if not csvs:
+            show_toast(self.root, "Drop .csv files exported from your launch monitor.",
+                       tone="warning")
+            return
+        self._import_csv_paths(csvs)
+
+    def _import_csv_paths(self, paths):
+        """Copy the given CSVs into raw_csvs/, ingest them, and refresh — shared
+        by the file picker and drag-and-drop."""
+        from data.io import import_csv_files
+        try:
+            copied, skipped = import_csv_files(paths, config.RAW_CSV_DIR)
+        except Exception:
+            log.exception("CSV import failed")
+            show_toast(self.root, "Couldn't import those CSVs — see the log.", tone="warning")
+            return
+        if not copied:
+            show_toast(self.root, "No launch-monitor CSVs found in that drop "
+                       "(need a club column and carry/ball-speed).", tone="warning")
+            return
+        processed = ingest_all_csvs(config.RAW_CSV_DIR, config.DATA_DIR)
+        n = processed or len(copied)
+        msg = f"Imported {n} CSV file{'s' if n != 1 else ''}."
+        if skipped:
+            msg += f" Skipped {len(skipped)} non-shot file{'s' if len(skipped) != 1 else ''}."
+        self._on_new_csv_data(msg)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -459,10 +699,39 @@ class SimAnalyticsApp:
         top_bar = theme.sidebar_frame(self.root, height=64)
         top_bar.pack(side=tk.TOP, fill=tk.X)
 
+        # Collapse/expand the left dashboard menu to hand its width to the
+        # charts. The glyph is a hamburger (menu) affordance — functional, not
+        # decorative.
+        self._sidebar_visible = True
+        self.sidebar_toggle_btn = theme.outline_button(
+            top_bar, accent=Colors.TEXT_MUTED, text="☰", command=self._toggle_sidebar,
+            width=44,
+        )
+        self.sidebar_toggle_btn.pack(side=tk.LEFT, padx=(15, 6), pady=12)
+        attach_tooltip(self.sidebar_toggle_btn, "Hide or show the dashboard menu")
+
         self.go_live_button = theme.outline_button(
             top_bar, accent=Colors.ACCENT, text="Go Live", command=self.toggle_live,
         )
-        self.go_live_button.pack(side=tk.LEFT, padx=(15, 6), pady=12)
+        self.go_live_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
+
+        # Explicit "End Round": archive the in-progress live round now so it
+        # shows up in the historical dashboards + contribution picker without a
+        # restart. Only visible while live mode is on (see _update_go_live_button).
+        self.end_round_button = theme.outline_button(
+            top_bar, accent=Colors.WARNING, text="End Round",
+            command=lambda: self._finalize_live_round(show_feedback=True),
+        )
+        attach_tooltip(self.end_round_button,
+                       "Finish and save the round you're tracking so it appears in your history now")
+
+        self.import_button = theme.outline_button(
+            top_bar, accent=Colors.INFO, text="Import CSV",
+            command=self._open_import_dialog,
+        )
+        self.import_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
+        attach_tooltip(self.import_button,
+                       "Import launch-monitor CSV files — or drag and drop them onto the window")
 
         self.contribute_button = theme.outline_button(
             top_bar, accent=Colors.SUCCESS, text="Contribute Data",
@@ -471,7 +740,7 @@ class SimAnalyticsApp:
         self.contribute_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
 
         self.settings_button = theme.outline_button(
-            top_bar, accent=Colors.ACCENT, text="⚙ Settings", command=self._open_settings,
+            top_bar, accent=Colors.ACCENT, text="Settings", command=self._open_settings,
         )
         self.settings_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
 
@@ -495,8 +764,11 @@ class SimAnalyticsApp:
                        "days compare fairly.")
         self.temp_norm_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
         self.temp_norm_frame.grid(row=0, column=7)
+        # No placeholder_text: CTkEntry ignores it once a textvariable is bound,
+        # so it never showed. A blank field means "off" (conveyed by the label's
+        # tooltip); the muted "°F" suffix labels the unit.
         temp_entry = ctk.CTkEntry(self.temp_norm_frame, textvariable=self.global_temp_var,
-                                  width=54, justify="center", placeholder_text="off")
+                                  width=54, justify="center")
         temp_entry.pack(side=tk.LEFT)
         theme.body_label(self.temp_norm_frame, "°F", color=Colors.TEXT_MUTED).pack(side=tk.LEFT, padx=(4, 0))
         temp_entry.bind("<Return>", self._on_filter_changed)
@@ -524,6 +796,7 @@ class SimAnalyticsApp:
         sidebar = theme.sidebar_frame(main_body, width=340)
         sidebar.pack(side=tk.LEFT, fill=tk.Y)
         sidebar.pack_propagate(False)
+        self.sidebar = sidebar
 
         self._build_sidebar_sections(sidebar)
 
@@ -532,6 +805,17 @@ class SimAnalyticsApp:
             side=tk.LEFT, fill=tk.BOTH, expand=True,
             padx=config.SPACING["sm"], pady=config.SPACING["sm"],
         )
+
+    def _toggle_sidebar(self):
+        """Hide/show the left dashboard menu so the chart area can use its
+        width. Re-packed before grid_frame so it returns to the left edge; the
+        active chart panels reflow via their own <Configure> handlers."""
+        if self._sidebar_visible:
+            self.sidebar.pack_forget()
+            self._sidebar_visible = False
+        else:
+            self.sidebar.pack(side=tk.LEFT, fill=tk.Y, before=self.grid_frame)
+            self._sidebar_visible = True
 
     def _build_sidebar_sections(self, sidebar):
         # Sections live in a scrollable container so the menu keeps working once
@@ -547,12 +831,13 @@ class SimAnalyticsApp:
 
         # Course-photo banner reusing the landing page's background image as
         # the sidebar's header; skipped silently if the photo is missing.
-        banner = course_banner(sidebar, self._find_background_image(), "Golf Sim Analytics")
+        banner = course_banner(sidebar, self._find_background_image(),
+                               "Golf Sim Analytics", scale=self.ui_scale)
         if banner is not None:
             banner.pack(fill=tk.X, padx=12, pady=(12, 4))
 
         metrics_card, metrics_body = theme.section_card(
-            sidebar, "Metrics Dashboards", accent=Colors.INFO, icon="📊",
+            sidebar, "Metrics Dashboards", accent=Colors.INFO,
         )
         metrics_card.pack(fill=tk.X, padx=12, pady=(8, 8))
         for d in DASHBOARDS:
@@ -560,7 +845,7 @@ class SimAnalyticsApp:
                 self._nav_item(metrics_body, d)
 
         opt_card, opt_body = theme.section_card(
-            sidebar, "Optimization Dashboards", accent=Colors.WARNING, icon="🎯",
+            sidebar, "Optimization Dashboards", accent=Colors.WARNING,
         )
         opt_card.pack(fill=tk.X, padx=12, pady=(0, 8))
         for d in DASHBOARDS:
@@ -568,7 +853,7 @@ class SimAnalyticsApp:
                 self._nav_item(opt_body, d)
 
         fitting_card, fitting_body = theme.section_card(
-            sidebar, "Club Fitting", accent=Colors.SUCCESS, icon="⛳",
+            sidebar, "Club Fitting", accent=Colors.SUCCESS,
         )
         fitting_card.pack(fill=tk.X, padx=12, pady=(0, 8))
         for d in DASHBOARDS:
@@ -576,7 +861,7 @@ class SimAnalyticsApp:
                 self._nav_item(fitting_body, d)
 
         speed_card, speed_body = theme.section_card(
-            sidebar, "Speed Training", accent=Colors.DANGER, icon="⚡",
+            sidebar, "Speed Training", accent=Colors.DANGER,
         )
         speed_card.pack(fill=tk.X, padx=12, pady=(0, 8))
         for d in DASHBOARDS:
@@ -584,12 +869,20 @@ class SimAnalyticsApp:
                 self._nav_item(speed_body, d)
 
         course_card, course_body = theme.section_card(
-            sidebar, "On-Course Play", accent=Colors.SUCCESS, icon="🏌️",
+            sidebar, "On-Course Play", accent=Colors.SUCCESS,
         )
         course_card.pack(fill=tk.X, padx=12, pady=(0, 8))
         for d in DASHBOARDS:
             if d.category == "On Course":
                 self._nav_item(course_body, d)
+
+        community_card, community_body = theme.section_card(
+            sidebar, "Community", accent=Colors.ACCENT,
+        )
+        community_card.pack(fill=tk.X, padx=12, pady=(0, 8))
+        for d in DASHBOARDS:
+            if d.category == "Community":
+                self._nav_item(community_body, d)
 
     def _nav_item(self, sidebar, d):
         entry = self.plot_state[d.name]
@@ -775,8 +1068,9 @@ class SimAnalyticsApp:
         return self._normalizer.normalize(df, temp) if temp is not None else df
 
     def _drop_warmup(self, df):
-        """Strip each session's warm-up shots when the Settings toggle is on."""
-        return filters_mod.drop_warmup_shots(df) if self.settings_ignore_warmup.get() else df
+        """Strip warm-up shots per the Settings warm-up mode (a no-op when the
+        mode is 'Keep all shots')."""
+        return filters_mod.drop_warmup_shots(df, self.settings_warmup_mode.get())
 
     def _column_max(self, aliases):
         # Seeds the all-time speed PBs from the *full* history (incl. on-course
@@ -863,9 +1157,12 @@ class SimAnalyticsApp:
         self._full_df = full
         # Practice-analytics view every dashboard reads: on-course rounds (chips,
         # punches, recoveries) filtered out when enabled so they don't taint the
-        # "pure your swing" historical data.
-        self.master_df = on_course.practice_view(
-            full, exclude_on_course=self.settings_exclude_on_course.get())
+        # "pure your swing" historical data. Putts are always dropped from this
+        # swing view (they're not launch-monitor shots — see
+        # on_course.exclude_putts) while _full_df keeps them so the on-course
+        # scorecard can still count strokes-per-hole.
+        self.master_df = on_course.exclude_putts(on_course.practice_view(
+            full, exclude_on_course=self.settings_exclude_on_course.get()))
         if "club" in self.master_df.columns:
             clubs = sorted(self.master_df["club"].dropna().unique().tolist(), key=get_club_rank)
             for c in clubs:
@@ -1021,7 +1318,12 @@ class SimAnalyticsApp:
             self.build_grid()
             self.refresh_all_active_plots()
 
-        open_manage_sessions_dialog(self.root, sessions, _on_toggle)
+        panel = DropdownPanel(
+            self.settings_button,
+            lambda card, close: build_manage_sessions_body(card, close, sessions, _on_toggle),
+            width=430)
+        self._manage_sessions_panel = panel
+        panel.open()
 
     def _capture_club_compare_shot(self, flat_shot: dict) -> None:
         cc = self.plot_state.get(CLUB_COMPARE_NAME)
@@ -1089,14 +1391,17 @@ class SimAnalyticsApp:
             return None
 
     def _open_settings(self):
-        win = ctk.CTkToplevel(self.root)
-        win.title("Settings")
-        win.configure(fg_color=Colors.BG_SURFACE)
-        win.transient(self.root)
-        win.geometry(f"+{self.root.winfo_rootx() + 260}+{self.root.winfo_rooty() + 140}")
+        # Drops down anchored under the Settings button (no floating window).
+        # Re-clicking toggles it closed; the panel also closes on click-away.
+        panel = getattr(self, "_settings_panel", None)
+        if panel is None:
+            panel = DropdownPanel(self.settings_button, self._build_settings_body, width=320)
+            self._settings_panel = panel
+        panel.toggle()
 
-        card = theme.card_frame(win)
-        card.pack(fill="both", expand=True, padx=16, pady=16)
+    def _build_settings_body(self, card, close):
+        """Fill the Settings dropdown panel. ``card`` is an already-scrollable
+        body (see ui.components.DropdownPanel); ``close`` dismisses the panel."""
         theme.section_label(card, "Settings", color=Colors.INFO).pack(anchor="w", pady=(2, 10))
 
         # Display scale — persists across launches (see data/settings.py). Lets
@@ -1113,6 +1418,20 @@ class SimAnalyticsApp:
         theme.body_label(card, "Sizes the whole app up or down. “Auto” fits your "
                          "display — smaller on a compact laptop, larger on a big monitor "
                          "or TV. Pick a percentage to override it.", color=Colors.TEXT_MUTED,
+                         font=theme.font("caption"), wraplength=300, justify="left").pack(
+            anchor="w", pady=(6, 12))
+
+        units_row = ctk.CTkFrame(card, fg_color="transparent")
+        units_row.pack(fill="x")
+        theme.body_label(units_row, "Distance units",
+                         color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
+        SingleSelectDropdown(
+            units_row, units_mod.UNIT_OPTIONS, self.settings_units,
+            on_change=self._apply_units_setting, accent=Colors.INFO, width=110,
+        ).pack(side="right")
+        theme.body_label(card, "Show carry, total and offline distances in yards or "
+                         "meters. Display only — your saved data and any community "
+                         "contribution stay in yards.", color=Colors.TEXT_MUTED,
                          font=theme.font("caption"), wraplength=300, justify="left").pack(
             anchor="w", pady=(6, 12))
 
@@ -1133,12 +1452,14 @@ class SimAnalyticsApp:
         row2.pack(fill="x")
         theme.body_label(row2, "Ignore warm-up shots",
                          color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
-        theme.toggle_switch(
-            row2, accent=Colors.INFO, text="", variable=self.settings_ignore_warmup,
-            command=self._apply_settings, onvalue=True, offvalue=False,
+        SingleSelectDropdown(
+            row2, filters_mod.WARMUP_MODE_OPTIONS, self.settings_warmup_mode,
+            on_change=self._apply_settings, accent=Colors.INFO, width=190,
         ).pack(side="right")
-        theme.body_label(card, "Drops the first 5 shots of each session from the "
-                         "dashboards (records and totals still count every shot).",
+        theme.body_label(card, "Drops “getting loose” shots from the dashboards — "
+                         "either the first 5 of each session, or the first shot of "
+                         "every club (for mixed-club bags). Records and totals still "
+                         "count every shot.",
                          color=Colors.TEXT_MUTED, font=theme.font("caption"),
                          wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
 
@@ -1188,13 +1509,58 @@ class SimAnalyticsApp:
                          color=Colors.TEXT_MUTED, font=theme.font("caption"),
                          wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
 
+        # ---- GSPro connection (live-tracking source folder) ----
+        theme.divider(card).pack(fill="x", pady=(0, 10))
+        theme.section_label(card, "GSPro connection", color=Colors.INFO).pack(
+            anchor="w", pady=(0, 6))
+
+        gspro_path_lbl = theme.body_label(
+            card, str(self._gspro_data_dir()), color=Colors.TEXT_PRIMARY,
+            font=theme.font("caption"), wraplength=300, justify="left", anchor="w")
+        gspro_path_lbl.pack(anchor="w")
+
+        self._gspro_status_label = theme.body_label(
+            card, "", font=theme.font("caption"), wraplength=300, justify="left", anchor="w")
+        self._gspro_status_label.pack(anchor="w", pady=(4, 6))
+        self._refresh_gspro_status_label()
+
+        def _choose_gspro_dir():
+            from tkinter import filedialog
+            start = self._gspro_data_dir()
+            chosen = filedialog.askdirectory(
+                parent=card.winfo_toplevel(), title="Select GSPro's data folder",
+                initialdir=str(start if start.exists() else Path.home()))
+            if chosen:
+                self.settings_gspro_dir.set(chosen)
+                self._apply_gspro_dir()
+                if gspro_path_lbl.winfo_exists():
+                    gspro_path_lbl.configure(text=str(self._gspro_data_dir()))
+
+        def _reset_gspro_dir():
+            self.settings_gspro_dir.set("")
+            self._apply_gspro_dir()
+            if gspro_path_lbl.winfo_exists():
+                gspro_path_lbl.configure(text=str(self._gspro_data_dir()))
+
+        gspro_btns = ctk.CTkFrame(card, fg_color="transparent")
+        gspro_btns.pack(fill="x")
+        theme.outline_button(gspro_btns, accent=Colors.INFO, text="Change folder…",
+                             command=_choose_gspro_dir, width=140).pack(side="left")
+        theme.outline_button(gspro_btns, accent=Colors.TEXT_MUTED, text="Use default",
+                             command=_reset_gspro_dir, width=110).pack(side="left", padx=(6, 0))
+        theme.body_label(card, "Where GSPro stores currentRound.dat / GSPro.db / Player.log "
+                         "for live tracking. This is GSPro's per-user data folder "
+                         "(AppData\\LocalLow\\GSPro\\GSPro), not where GSPro is installed. "
+                         "Only change it if the status above says it wasn't found.",
+                         color=Colors.TEXT_MUTED, font=theme.font("caption"),
+                         wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
+
         theme.outline_button(card, accent=Colors.INFO, text="Manage sessions…",
-                             command=lambda: (win.destroy(), self._open_manage_sessions()),
+                             command=lambda: (close(), self._open_manage_sessions()),
                              width=170).pack(anchor="w", pady=(0, 12))
 
         theme.outline_button(card, accent=Colors.TEXT_MUTED, text="Close",
-                             command=win.destroy, width=100).pack(side="right")
-        win.after(120, lambda: (win.winfo_exists() and (win.lift(), win.focus_force())))
+                             command=close, width=100).pack(side="right")
 
     def _sample_set_available(self) -> bool:
         """True if the selected demo dataset's folder exists with data in it;
@@ -1240,6 +1606,18 @@ class SimAnalyticsApp:
         settings_mod.set("exclude_on_course_from_practice",
                          self.settings_exclude_on_course.get())
         self.load_master_data()
+        self.build_grid()
+        self.refresh_all_active_plots()
+
+    def _apply_units_setting(self, _value=None):
+        """Persist the yards/meters choice and repaint — it's a display-only
+        conversion, so no data reload is needed, just a redraw of the charts
+        and the landing page (whose distance tiles read the unit too)."""
+        settings_mod.set("units", self.settings_units.get())
+        if self._home_frame is not None:
+            if self._home_frame.winfo_exists():
+                self._home_frame.destroy()
+            self._home_frame = None
         self.build_grid()
         self.refresh_all_active_plots()
 
@@ -1347,9 +1725,33 @@ class SimAnalyticsApp:
             entry.pop(key, None)
         entry.pop("_resize_state", None)
 
+    def _font_scale_for_fig(self, fig) -> int:
+        """Chart font point-size derived from the figure's *actual* pixel
+        geometry, not the panel count — so a stacked half-height panel and a
+        side-by-side half-width panel get fonts suited to their real space
+        instead of the same number.
+
+        The ui-scale factor already lives in the figure DPI (text grows with
+        DPI), so we normalize the pixel size back to a DPI-100 reference here
+        to avoid double-counting it. The smaller (governing) dimension drives
+        the size, since that's what runs out of room first.
+        """
+        w_px, h_px = fig.get_size_inches() * fig.dpi
+        ref = 100.0 / max(fig.dpi, 1)
+        governing = min(w_px, h_px) * ref
+        # ~14pt at a comfortable full panel, easing down for smaller panels.
+        font = self.plot_font_scale - (1000 - governing) * 0.006
+        return int(max(9, min(16, round(font))))
+
     @staticmethod
-    def _font_bucket(count: int) -> int:
-        return 3 if count >= 3 else count
+    def _size_signature(fig) -> tuple:
+        """Coarse geometry fingerprint (≈60px granularity) used to decide when
+        a resized panel needs a full re-render — recomputing fonts and any
+        height-aware layout — versus just a bitmap rescale. Kept coarse so a
+        drag doesn't re-render every debounce tick, only when the panel's size
+        class actually changes."""
+        w_px, h_px = fig.get_size_inches() * fig.dpi
+        return (round(w_px / 60), round(h_px / 60))
 
     def _panel_placement(self, active):
         """Grid placement for up to two panels: returns
@@ -1455,21 +1857,15 @@ class SimAnalyticsApp:
         self.grid_frame.columnconfigure(0, weight=1)
         self.grid_frame.columnconfigure(1, weight=1 if cols_used == 2 else 0)
 
-        bucket = self._font_bucket(len(placement))
-        frames = None
+        # Persisting panels are just re-gridded; the <Configure> event their
+        # new size fires drives any needed re-render through _apply_resize
+        # (which re-renders when the panel's size class changes). New panels
+        # get built and do their first render on their first <Configure>.
         for name, (r, c) in placement.items():
             entry = self.plot_state[name]
             if "panel" in entry:
                 entry["panel"].grid_configure(row=r, column=c)
-                if entry.get("bucket") != bucket and entry.get("rendered_once"):
-                    entry["bucket"] = bucket
-                    if frames is None:
-                        frames = self._filtered_frames()
-                    self.update_single_plot(name, len(placement), frames=frames)
-                else:
-                    entry["bucket"] = bucket
             else:
-                entry["bucket"] = bucket
                 self._place_single_plot_panel(name, r, c)
 
     def _render_home_page(self):
@@ -1482,7 +1878,8 @@ class SimAnalyticsApp:
             empty_hint=(f"Drop GSPro CSV exports into {config.RAW_CSV_DIR.name}/ — "
                         "they're picked up automatically"),
             trends=compute_home_trends(self.master_df),
-            records=compute_player_records(self.master_df),
+            records=compute_player_records(self.master_df, self.settings_units.get()),
+            scale=self.ui_scale,
         )
         home_frame.grid(row=0, column=0, sticky="nsew")
         self._home_frame = home_frame
@@ -1508,8 +1905,7 @@ class SimAnalyticsApp:
 
         header_color = CATEGORY_HEADER_COLOR.get(d.category, Colors.TEXT_PRIMARY)
         theme.section_label(
-            top_bar, name, color=header_color,
-            font=ctk.CTkFont(family=config.FONT_FAMILY, size=19, weight="bold"),
+            top_bar, name, color=header_color, font=theme.font("title", "bold"),
         ).pack(side=tk.LEFT)
 
         def update_local(*_a, n=name):
@@ -1661,9 +2057,14 @@ class SimAnalyticsApp:
                 fig.set_size_inches(width / dpi, height / dpi, forward=True)
                 canvas.draw_idle()
 
+            count = sum(1 for e in self.plot_state.values() if e["var"].get()) or 1
             if not entry.get("rendered_once"):
                 entry["rendered_once"] = True
-                count = sum(1 for e in self.plot_state.values() if e["var"].get()) or 1
+                self.update_single_plot(name, count)
+            elif self._size_signature(fig) != entry.get("_rendered_sig"):
+                # The panel changed size class (e.g. solo -> stacked): re-render
+                # so fonts and any height-aware layout recompute, rather than
+                # just rescaling the old bitmap to the new size.
                 self.update_single_plot(name, count)
 
         def on_configure(event):
@@ -1687,14 +2088,13 @@ class SimAnalyticsApp:
             entry["latest_quality"] = self._live_shot_quality(
                 self.live_shot_buffer[-1] if self.live_shot_buffer else None)
 
-        # Fonts shrink as more panels share the grid (each panel gets smaller).
-        # 4-up panels are the tightest — especially dense ones like Club Gapping
-        # with a label per club — so they step down hardest to avoid overlap.
-        base_scale = self.plot_font_scale
-        reduction = {1: 0, 2: 1, 3: 3}.get(num_plots, 5)  # 4+ -> base - 5
-        font_scale = max(8, base_scale - reduction)
-
         fig = entry["fig"]
+
+        # Font size tracks the panel's real pixel geometry (see
+        # _font_scale_for_fig), so a chart adapts to whatever space it actually
+        # has — solo, side-by-side, or stacked — rather than a panel-count guess.
+        font_scale = self._font_scale_for_fig(fig)
+        entry["_rendered_sig"] = self._size_signature(fig)
 
         # Live Dispersion (self.live_shot_buffer) and On-Course Play
         # (self._full_df's course rounds) both have their own data source and
@@ -1723,6 +2123,14 @@ class SimAnalyticsApp:
             # Course rounds only — this dashboard scores actual play, which
             # practice-only master_df deliberately excludes (see _full_df).
             df_filtered = on_course.on_course_view(self._full_df)
+        elif name == COMMUNITY_NAME:
+            # Remote community shots (fetched off-thread on first open), narrowed
+            # by the global Club Filter like every other dashboard.
+            self._ensure_community_data()
+            df_filtered = self._community_df if self._community_df is not None else pd.DataFrame()
+            if not df_filtered.empty and "club" in df_filtered.columns:
+                df_filtered = df_filtered[
+                    df_filtered["club"].isin(self._selected_global_clubs())]
         elif name in (GAPPING_NAME, LAUNCH_SPIN_NAME):
             df_filtered = df_gap
         else:
@@ -1745,12 +2153,21 @@ class SimAnalyticsApp:
             club_colors = {}
 
         try:
-            if df_filtered.empty and name not in (LIVE_NAME, ONCOURSE_NAME):
+            render_extra = {
+                "benchmarks": self._selected_benchmarks(entry),
+                "units": self.settings_units.get(),
+            }
+            if name == COMMUNITY_NAME:
+                # The Community chart renders its own offline/loading/empty
+                # message from these, so it's excluded from the generic guard.
+                render_extra["community_status"] = self._community_status
+                render_extra["community_as_of"] = self._community_as_of
+            if df_filtered.empty and name not in (LIVE_NAME, ONCOURSE_NAME, COMMUNITY_NAME):
                 show_message(fig, "No data matching filters", font_scale,
                              hint="Loosen the Time / Club / Shot Quality filters above")
             else:
                 entry["def"].render(fig, df_filtered, club_colors, font_scale, entry,
-                                    benchmarks=self._selected_benchmarks(entry))
+                                    **render_extra)
         except Exception:
             log.exception("Chart render failed for %s", name)
             show_message(fig, "Something went wrong rendering this chart.", font_scale,

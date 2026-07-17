@@ -60,6 +60,36 @@ def _apply_ui_scaling() -> float:
     return scale
 
 
+def _create_root() -> ctk.CTk:
+    """The main window, drag-and-drop enabled when tkinterdnd2 is available.
+
+    tkinterdnd2's file-drop support lives in a mixin (DnDWrapper) that needs the
+    tkdnd Tcl package loaded into the interpreter. We fold it onto customtkinter's
+    CTk so the existing app keeps its theming and scaling, and fall back to a
+    plain CTk (no drops, everything else identical) if the library or its native
+    tkdnd binaries aren't present — so a missing optional dependency never stops
+    the app from launching.
+    """
+    try:
+        from tkinterdnd2 import TkinterDnD
+
+        class _DnDRoot(ctk.CTk, TkinterDnD.DnDWrapper):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.TkdndVersion = TkinterDnD._require(self)
+
+        root = _DnDRoot()
+        root._dnd_enabled = True
+        return root
+    except Exception:
+        logging.getLogger(__name__).info(
+            "Drag-and-drop unavailable (tkinterdnd2/tkdnd not loaded) — "
+            "CSV import via the file picker still works", exc_info=True)
+        root = ctk.CTk()
+        root._dnd_enabled = False
+        return root
+
+
 def _set_app_icon(root: ctk.CTk) -> None:
     try:
         import config
@@ -84,7 +114,7 @@ def main() -> None:
     ui_scale = _apply_ui_scaling()
 
     try:
-        root = ctk.CTk()
+        root = _create_root()
     except tk.TclError:
         log.exception("Failed to create the main window")
         raise

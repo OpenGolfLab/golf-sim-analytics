@@ -17,6 +17,7 @@ from data.columns import (
     BALL_SPEED_ALIASES, CARRY_ALIASES, CLUB_SPEED_ALIASES, LAUNCH_ANGLE_ALIASES,
     OFFLINE_ALIASES, SMASH_FACTOR_ALIASES, SPIN_RATE_ALIASES, TOTAL_ALIASES, find_col,
 )
+from data import units as units_mod
 from ui.charts._compare import PALETTE, render_comparison
 from ui.empty_state import show_message
 
@@ -112,4 +113,5 @@ def render(fig, df, club_colors, font_scale, config, **extra):
         empty_msg=("Start hitting to log shots for each club" if live
                    else "No shots match the configured ranges"),
         subtitle=("Live capture · shots logged per club" if live
-                  else "One session · configs by brand / adapter"))
+                  else "One session · configs by brand / adapter"),
+        unit=extra.get("units", units_mod.YARDS))

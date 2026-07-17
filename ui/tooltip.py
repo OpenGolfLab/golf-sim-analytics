@@ -36,8 +36,16 @@ def attach_tooltip(widget, text: str, delay_ms: int = 450, wraplength: int = 240
                      font=theme.font("body"), wraplength=wraplength,
                      justify="left").pack(padx=10, pady=6)
         tip.update_idletasks()
+        tw, th = tip.winfo_reqwidth(), tip.winfo_reqheight()
+        sw, sh = widget.winfo_screenwidth(), widget.winfo_screenheight()
+        # Default to the right of the widget; flip to the left if that would run
+        # off the right edge of the screen (e.g. the Today's Temp label sits far
+        # right in the top bar). Then clamp fully on-screen both ways.
         x = widget.winfo_rootx() + widget.winfo_width() + 8
-        y = widget.winfo_rooty() + 4
+        if x + tw > sw:
+            x = widget.winfo_rootx() - tw - 8
+        x = max(0, min(x, sw - tw))
+        y = max(0, min(widget.winfo_rooty() + 4, sh - th))
         tip.geometry(f"+{x}+{y}")
         state["tip"] = tip
 

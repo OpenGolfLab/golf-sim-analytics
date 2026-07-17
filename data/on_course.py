@@ -48,6 +48,20 @@ def on_course_view(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["round_type"].astype(str) == ON_COURSE]
 
 
+def exclude_putts(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop putter strokes (club == "Putter") from a frame.
+
+    Putts are kept in the stored data so the scorecard can count strokes, but
+    they are not launch-monitor shots — their ball data is copied from the
+    preceding shot (see config.CLUB_INDEX_MAP's note on ClubIndex 26) — so
+    every swing-analytics view and the contribution export drop them here. No-op
+    when there's no club column."""
+    from config import NON_SWING_CLUBS
+    if df.empty or "club" not in df.columns:
+        return df
+    return df[~df["club"].astype(str).str.strip().isin(NON_SWING_CLUBS)]
+
+
 # ---------------------------------------------------------------------------
 # Scoring — turn the shot stream into per-hole and per-round scorecards.
 #

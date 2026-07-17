@@ -19,11 +19,25 @@ the same way:
 from __future__ import annotations
 
 import tkinter as tk
+import tkinter.font as tkfont
 
 import customtkinter as ctk
 
-from config import Colors
+from config import Colors, FONT_FAMILY, FONT_SCALE
 from ui import theme
+
+
+def _fit_width(texts, extra: int = 24, min_w: int = 120, max_w: int = 360) -> int:
+    """Width (unscaled CTk units) that fits the widest of `texts` at the body
+    font, plus `extra` px of chrome (checkbox, padding), clamped to
+    [min_w, max_w]. Keeps dropdown popups from truncating long items (e.g.
+    'Jul 08, 2026 · 42 shots [stiff-tip]') while never running off-screen."""
+    try:
+        f = tkfont.Font(family=FONT_FAMILY, size=FONT_SCALE["body"])
+        widest = max((f.measure(str(t)) for t in texts), default=0)
+    except tk.TclError:
+        widest = 0
+    return max(min_w, min(max_w, widest + extra))
 
 
 class _PopupDropdownBase(ctk.CTkFrame):
@@ -133,6 +147,112 @@ class _PopupDropdownBase(ctk.CTkFrame):
         raise NotImplementedError
 
 
+class DropdownPanel:
+    """A large dropdown *surface* — a scrollable panel that drops down anchored
+    beneath an existing trigger widget (a top-bar button), instead of opening as
+    a separate floating window you have to drag around.
+
+    Same dismissal model as the small select popups (_PopupDropdownBase): the
+    panel closes on a click anywhere else in the window, on Escape, or when the
+    window moves/resizes underneath it. Unlike _PopupDropdownBase it doesn't own
+    its own button — the caller passes the trigger widget to anchor under and a
+    ``build_content(parent, close)`` callback that fills the scrollable body.
+
+    Used for Settings / Contribute / Manage Sessions, which used to each open a
+    CTkToplevel window.
+    """
+
+    def __init__(self, anchor, build_content, *, width: int = 460,
+                 on_close=None):
+        self.anchor = anchor
+        self.build_content = build_content
+        self.width = width
+        self.on_close = on_close
+        self._popup: ctk.CTkToplevel | None = None
+        self._root_binds_installed = False
+
+    def is_open(self) -> bool:
+        return self._popup is not None and self._popup.winfo_exists()
+
+    def toggle(self):
+        if self.is_open():
+            self.close()
+        else:
+            self.open()
+
+    def open(self):
+        if self.is_open():
+            self.anchor.after(10, self._reposition)
+            return
+        root = self.anchor.winfo_toplevel()
+        self._install_root_binds(root)
+
+        self._popup = ctk.CTkToplevel(self.anchor)
+        self._popup.overrideredirect(True)
+        self._popup.attributes("-topmost", True)
+        self._popup.configure(fg_color=Colors.BG_SURFACE)
+        self._popup.bind("<Escape>", lambda _e: self.close())
+
+        outer = theme.card_frame(self._popup, corner_radius=8)
+        outer.pack(fill="both", expand=True, padx=1, pady=1)
+        self._body = ctk.CTkScrollableFrame(
+            outer, fg_color="transparent", width=self.width,
+            scrollbar_button_color=Colors.BG_HOVER)
+        self._body.pack(fill="both", expand=True, padx=4, pady=4)
+
+        self.build_content(self._body, self.close)
+        self._reposition()
+
+    def _reposition(self):
+        if not self.is_open():
+            return
+        self._popup.update_idletasks()
+        ax, ay = self.anchor.winfo_rootx(), self.anchor.winfo_rooty()
+        below = ay + self.anchor.winfo_height() + 2
+        w = max(self.width + 24, self._popup.winfo_reqwidth())
+        h = self._popup.winfo_reqheight()
+        sw = self._popup.winfo_screenwidth()
+        sh = self._popup.winfo_screenheight()
+        # Keep the panel on-screen: clamp width against the right edge and
+        # height against the bottom (the body scrolls if it's taller).
+        w = min(w, sw - 16)
+        h = min(h, max(200, sh - below - 16))
+        x = min(ax, max(0, sw - w - 8))
+        self._popup.geometry(f"{w}x{h}+{x}+{below}")
+
+    def _install_root_binds(self, root):
+        if self._root_binds_installed:
+            return
+        self._root_binds_installed = True
+        root.bind("<ButtonPress>", self._on_root_click, add="+")
+        root.bind("<Escape>", lambda _e: self.close(), add="+")
+        root.bind("<Configure>", self._on_root_configure, add="+")
+
+    def _on_root_click(self, event):
+        # A click inside the panel lands on the panel's own toplevel and never
+        # reaches this handler; a press on the trigger widget is excluded so its
+        # command can toggle us (otherwise we'd close on press and immediately
+        # reopen on release). Any other press in the window dismisses.
+        if not self.is_open():
+            return
+        ax, ay = self.anchor.winfo_rootx(), self.anchor.winfo_rooty()
+        if (ax <= event.x_root < ax + self.anchor.winfo_width()
+                and ay <= event.y_root < ay + self.anchor.winfo_height()):
+            return
+        self.close()
+
+    def _on_root_configure(self, event):
+        if self.is_open() and str(event.widget) == str(self.anchor.winfo_toplevel()):
+            self.close()
+
+    def close(self):
+        if self._popup is not None:
+            self._popup.destroy()
+            self._popup = None
+        if self.on_close:
+            self.on_close()
+
+
 class SingleSelectDropdown(_PopupDropdownBase):
     """Exactly one choice from a fixed list of mutually-exclusive options.
 
@@ -156,6 +276,7 @@ class SingleSelectDropdown(_PopupDropdownBase):
         list_frame = ctk.CTkFrame(card, fg_color="transparent")
         list_frame.pack(padx=4, pady=4)
 
+        opt_w = _fit_width(self.options, extra=28)
         current = self.variable.get()
         for option in self.options:
             is_selected = option == current
@@ -168,7 +289,7 @@ class SingleSelectDropdown(_PopupDropdownBase):
                 text_color=Colors.TEXT_ACTIVE if is_selected else Colors.TEXT_PRIMARY,
                 font=theme.font("body", "bold" if is_selected else "normal"),
                 corner_radius=6,
-                width=180,
+                width=opt_w,
                 command=lambda o=option: self._select(o),
             ).pack(fill="x", pady=1)
 
@@ -249,8 +370,11 @@ class MultiSelectDropdown(_PopupDropdownBase):
         ).pack(side="right")
 
         list_height = min(320, max(1, len(self.variables)) * 30 + 10)
+        # Fit the widest item label (plus the checkbox + scrollbar chrome) so
+        # long labels don't truncate inside the checklist.
+        scroll_w = _fit_width(self.variables.keys(), extra=54)
         scroll = ctk.CTkScrollableFrame(
-            card, width=170, height=list_height, fg_color="transparent",
+            card, width=scroll_w, height=list_height, fg_color="transparent",
         )
         scroll.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 

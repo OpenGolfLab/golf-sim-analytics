@@ -86,19 +86,26 @@ def _rounded_cover(src: Image.Image, size: tuple[int, int], radius: int,
     return out
 
 
-def course_banner(master, image_path, title: str) -> ctk.CTkLabel | None:
+def course_banner(master, image_path, title: str, scale: float = 1.0) -> ctk.CTkLabel | None:
     """Sidebar header: a rounded strip of the course photo with the app
     title overlaid. Returns None when the photo is missing so the caller
-    can simply skip it."""
+    can simply skip it. `scale` is the app's display-scale factor: the CTk
+    sidebar width tracks it, and this raw PIL image would otherwise not, so
+    the banner is sized up/down to stay flush with the sidebar."""
     if not image_path:
         return None
     try:
         src = Image.open(image_path)
     except Exception:
         return None
-    size = (316, 84)
-    img = _rounded_cover(src, size, radius=10, dim_toward=Colors.BG_SIDEBAR, dim=0.45)
-    banner = ctk.CTkImage(light_image=img, dark_image=img, size=size)
+    # CTkImage multiplies its display `size` by the widget scaling itself, so
+    # size stays unscaled here; the *source* PIL is rendered at the scaled
+    # resolution so it stays sharp (not upscaled) on a hi-DPI / scaled display.
+    disp_size = (316, 84)
+    src_size = (round(316 * scale), round(84 * scale))
+    img = _rounded_cover(src, src_size, radius=round(10 * scale),
+                         dim_toward=Colors.BG_SIDEBAR, dim=0.45)
+    banner = ctk.CTkImage(light_image=img, dark_image=img, size=disp_size)
     label = ctk.CTkLabel(
         master, image=banner, text=title, compound="center",
         font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SCALE["subheading"], weight="bold"),
@@ -110,14 +117,27 @@ def course_banner(master, image_path, title: str) -> ctk.CTkLabel | None:
 
 def build_home_page(parent, stats: HomeStats, image_path,
                     empty_hint: str = "", trends: HomeTrends | None = None,
-                    records: PlayerRecords | None = None) -> ctk.CTkFrame:
+                    records: PlayerRecords | None = None,
+                    scale: float = 1.0) -> ctk.CTkFrame:
     """The landing page. `empty_hint` is shown instead of the stats when
-    there's no data yet."""
+    there's no data yet.
+
+    This is drawn on a raw tk.Canvas, which (unlike CTk widgets) doesn't
+    inherit the app's display scaling — so every font size and fixed pixel
+    metric here is multiplied by `scale` (via sc()) to keep the landing page
+    sized in step with the rest of the app on a projector or hi-DPI panel.
+    Positions derived from the live canvas w/h are already in real pixels and
+    are left proportional.
+    """
     frame = ctk.CTkFrame(parent, fg_color=Colors.BG_BASE, corner_radius=0)
     canvas = tk.Canvas(frame, highlightthickness=0, bg=Colors.BG_BASE)
     canvas.pack(fill=tk.BOTH, expand=True)
     trends = trends or HomeTrends()
     records = records or PlayerRecords()
+
+    def sc(v) -> int:
+        """Scale a fixed pixel/point metric by the display factor."""
+        return max(1, int(round(v * scale)))
 
     try:
         src = Image.open(image_path) if image_path else None
@@ -126,32 +146,33 @@ def build_home_page(parent, stats: HomeStats, image_path,
 
     state = {"job": None, "size": (0, 0), "photos": []}
 
-    def _font(scale: str, weight: str | None = None):
-        spec = (FONT_FAMILY, FONT_SCALE[scale])
+    def _font(scale_name: str, weight: str | None = None):
+        spec = (FONT_FAMILY, sc(FONT_SCALE[scale_name]))
         return spec + (weight,) if weight else spec
 
     def _card(blurred, box, title, title_color):
         """Frosted card with a bold title; content is drawn by the caller."""
-        photo = _frosted(blurred, box, radius=14)
+        photo = _frosted(blurred, box, radius=sc(14))
         state["photos"].append(photo)
         canvas.create_image(box[0], box[1], image=photo, anchor="nw")
         if title:
-            canvas.create_text(box[0] + 18, box[1] + 24, text=title, anchor="w",
+            canvas.create_text(box[0] + sc(18), box[1] + sc(24), text=title, anchor="w",
                                font=_font("label", "bold"), fill=title_color)
 
     def _tile(blurred, box, label, value, value_color=Colors.TEXT_ACTIVE):
         _card(blurred, box, None, None)
-        x = box[0] + 18
-        canvas.create_text(x, box[1] + 24, text=label, anchor="w",
+        x = box[0] + sc(18)
+        canvas.create_text(x, box[1] + sc(24), text=label, anchor="w",
                            font=_font("caption"), fill=Colors.TEXT_MUTED)
         # Shrink the value to fit the tile so long records ("183.3 MPH") don't
         # overflow into the next tile.
-        inner = (box[2] - box[0]) - 34
-        size = FONT_SCALE["heading"]
-        while size > FONT_SCALE["body"] and tkfont.Font(
+        inner = (box[2] - box[0]) - sc(34)
+        size = sc(FONT_SCALE["heading"])
+        floor = sc(FONT_SCALE["body"])
+        while size > floor and tkfont.Font(
                 family=FONT_FAMILY, size=size, weight="bold").measure(value) > inner:
             size -= 1
-        canvas.create_text(x, box[3] - 30, text=value, anchor="w",
+        canvas.create_text(x, box[3] - sc(30), text=value, anchor="w",
                            font=(FONT_FAMILY, size, "bold"), fill=value_color)
 
     def _sparkline(x, y, w, h, values, color):
@@ -161,7 +182,7 @@ def build_home_page(parent, stats: HomeStats, image_path,
         for i, v in enumerate(values):
             pts.append(x + w * i / (len(values) - 1))
             pts.append(y + h - h * (v - vmin) / span)
-        canvas.create_line(*pts, fill=color, width=2, smooth=True)
+        canvas.create_line(*pts, fill=color, width=sc(2), smooth=True)
 
     def _shot_quality_panel(blurred, box):
         """Full-width panel: the current average Shot Quality score on the left,
@@ -170,31 +191,33 @@ def build_home_page(parent, stats: HomeStats, image_path,
         _card(blurred, box, "Shot quality", Colors.SUCCESS)
         q = stats.avg_shot_quality
         q_color = _quality_color(q)
-        cx = x0 + 26
-        cyc = (y0 + y1) / 2 + 10
+        cx = x0 + sc(26)
+        cyc = (y0 + y1) / 2 + sc(10)
         q_text = "---" if q is None else str(q)
+        big_size = sc(50)
         canvas.create_text(cx, cyc, text=q_text, anchor="w",
-                           font=(FONT_FAMILY, 50, "bold"), fill=q_color)
-        big = tkfont.Font(family=FONT_FAMILY, size=50, weight="bold")
-        canvas.create_text(cx + big.measure(q_text) + 8, cyc + 8, text="/ 100",
+                           font=(FONT_FAMILY, big_size, "bold"), fill=q_color)
+        big = tkfont.Font(family=FONT_FAMILY, size=big_size, weight="bold")
+        canvas.create_text(cx + big.measure(q_text) + sc(8), cyc + sc(8), text="/ 100",
                            anchor="w", font=_font("body"), fill=Colors.TEXT_MUTED)
-        canvas.create_text(cx, y1 - 24, text="Average score", anchor="w",
+        canvas.create_text(cx, y1 - sc(24), text="Average score", anchor="w",
                            font=_font("caption"), fill=Colors.TEXT_MUTED)
 
         series = trends.shot_quality_series
         sx0 = x0 + int((x1 - x0) * 0.34)
-        sx1, sy0, sy1 = x1 - 30, y0 + 56, y1 - 44
+        sx1, sy0, sy1 = x1 - sc(30), y0 + sc(56), y1 - sc(44)
         if len(series) >= 2:
             _sparkline(sx0, sy0, sx1 - sx0, sy1 - sy0, series, q_color)
             vmin, vmax = min(series), max(series)
             span = (vmax - vmin) or 1.0
             ly = sy0 + (sy1 - sy0) - (sy1 - sy0) * (series[-1] - vmin) / span
-            canvas.create_oval(sx1 - 4, ly - 4, sx1 + 4, ly + 4, fill=q_color, outline="")
-            canvas.create_text(sx1, ly - 12, text=f"{series[-1]:.0f}", anchor="s",
+            r = sc(4)
+            canvas.create_oval(sx1 - r, ly - r, sx1 + r, ly + r, fill=q_color, outline="")
+            canvas.create_text(sx1, ly - sc(12), text=f"{series[-1]:.0f}", anchor="s",
                                font=_font("caption", "bold"), fill=Colors.TEXT_PRIMARY)
-            canvas.create_text(sx0, sy1 + 16, text=f"{len(series)} sessions ago",
+            canvas.create_text(sx0, sy1 + sc(16), text=f"{len(series)} sessions ago",
                                anchor="w", font=_font("caption"), fill=Colors.TEXT_MUTED)
-            canvas.create_text(sx1, sy1 + 16, text="latest", anchor="e",
+            canvas.create_text(sx1, sy1 + sc(16), text="latest", anchor="e",
                                font=_font("caption"), fill=Colors.TEXT_MUTED)
         else:
             canvas.create_text((sx0 + sx1) / 2, (sy0 + sy1) / 2,
@@ -215,29 +238,29 @@ def build_home_page(parent, stats: HomeStats, image_path,
         else:
             blurred = Image.new("RGB", (w, h), _hex_rgb(Colors.BG_BASE))
 
-        content_w = min(w - 64, 1320)
+        content_w = min(w - sc(64), sc(1320))
         x0 = (w - content_w) // 2
-        gap = 14
+        gap = sc(14)
 
         canvas.create_text(
             w / 2, h * 0.13, text="Master your game", justify="center",
-            font=(FONT_FAMILY + " Light", 46, "italic"), fill=Colors.TEXT_ACTIVE,
+            font=(FONT_FAMILY + " Light", sc(46), "italic"), fill=Colors.TEXT_ACTIVE,
         )
 
         if stats.total_shots == 0:
             y = int(h * 0.30)
-            box = (x0, y, x0 + content_w, y + 130)
+            box = (x0, y, x0 + content_w, y + sc(130))
             _card(blurred, box, None, None)
-            canvas.create_text(w / 2, y + 50, text="No shot data yet",
+            canvas.create_text(w / 2, y + sc(50), text="No shot data yet",
                                font=_font("subheading", "bold"), fill=Colors.TEXT_PRIMARY)
             if empty_hint:
-                canvas.create_text(w / 2, y + 86, text=empty_hint,
+                canvas.create_text(w / 2, y + sc(86), text=empty_hint,
                                    font=_font("body"), fill=Colors.TEXT_MUTED,
-                                   width=content_w - 40, justify="center")
+                                   width=content_w - sc(40), justify="center")
             return
 
         # Vertically center the whole block in the space below the hero.
-        tile_h, rec_h, sq_h = 100, 100, 176
+        tile_h, rec_h, sq_h = sc(100), sc(100), sc(176)
         total_h = tile_h + rec_h + sq_h + 2 * gap
         y = max(int(h * 0.22), int(h * 0.18 + (h * 0.82 - total_h) / 2))
 

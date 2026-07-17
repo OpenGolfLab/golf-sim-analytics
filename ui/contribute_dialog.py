@@ -3,9 +3,15 @@
 Themed to match the rest of the app (see ui/adapter_dialog.py for the same
 pattern). It owns no data: consent + the persisted contributor id live in
 ``contribute`` (BASE_DIR), and the shot history is loaded on demand via
-``data.store.load_master_dataframe``. Export is opt-in — the button does nothing
+``data.store.load_master_dataframe``. Export is opt-in — the buttons do nothing
 until the consent box is ticked, which is exactly what contribute.build_bundle
 enforces too.
+
+The user picks *which rounds* to send from a session list, rather than shipping
+their entire history in one bundle. This is the fix for the "the app sent the
+wrong / far more shots than I hit" report: nothing goes out except the sessions
+explicitly checked here, and the exact shot count that will be sent is shown
+before submitting.
 """
 from __future__ import annotations
 
@@ -13,9 +19,10 @@ import tkinter as tk
 from tkinter import filedialog
 
 import customtkinter as ctk
+import pandas as pd
 
 import config
-from config import Colors
+from config import Colors, get_club_rank  # noqa: F401 (get_club_rank kept for parity)
 from ui import theme
 
 import contribute
@@ -25,27 +32,56 @@ from data.store import load_master_dataframe
 # Consent copy — mirrors what contribute.build_bundle actually does, and the
 # data-use policy on opengolflab.com (raw stays private, only aggregates ship).
 _INTRO = (
-    "Help build open, community golf data. If you opt in, Golf Sim Analytics "
-    "exports an anonymized copy of your shot metrics to share with OpenGolfLab."
+    "Help build open, community golf data. Pick the rounds you want to share and "
+    "Golf Sim Analytics sends an anonymized copy of just those shots to OpenGolfLab."
 )
 _POINTS = [
     ("Shared", "club, ball & club speed, launch, spin, carry and similar per-shot numbers — plus an optional handicap band you pick."),
     ("Never shared", "your name, email, files, or anything identifying. No account, no tracking."),
     ("How it's used", "only combined community averages are ever published on opengolflab.com. Your raw shots stay private and are never sold."),
-    ("Your choice", "sharing is off unless you turn it on, and you can stop anytime."),
+    ("Your choice", "sharing is off unless you turn it on, you pick which rounds go, and you can stop anytime."),
 ]
 
+_PUTTER = "putter"
 
-def open_contribute_dialog(root):
-    """Open the contribution dialog. Returns the Toplevel."""
-    win = ctk.CTkToplevel(root)
-    win.title("Contribute to OpenGolfLab")
-    win.configure(fg_color=Colors.BG_SURFACE)
-    win.transient(root)
-    win.geometry(f"+{root.winfo_rootx() + 220}+{root.winfo_rooty() + 120}")
 
-    card = theme.card_frame(win)
-    card.pack(fill="both", expand=True, padx=16, pady=16)
+def _session_rows(df: pd.DataFrame) -> list[tuple[str, str, int]]:
+    """(session_id, human label, contributable shot count) per session, newest
+    first. The count excludes putts (club == "Putter") because those never get
+    contributed — so the number shown here matches what actually ships."""
+    if df is None or df.empty or "session_id" not in df.columns:
+        return []
+
+    contributable = df
+    if "club" in df.columns:
+        contributable = df[df["club"].astype(str).str.strip().str.casefold() != _PUTTER]
+
+    dates = (pd.to_datetime(df["session_date"], errors="coerce")
+             if "session_date" in df.columns else pd.Series(pd.NaT, index=df.index))
+    date_by_sid = dates.groupby(df["session_id"]).max()
+    counts = contributable.groupby("session_id").size() if "session_id" in contributable.columns \
+        else pd.Series(dtype=int)
+
+    rows = []
+    for sid in df["session_id"].dropna().unique():
+        n = int(counts.get(sid, 0))
+        if n <= 0:
+            continue  # a putts-only / empty session has nothing to send
+        d = date_by_sid.get(sid)
+        when = d.strftime("%b %d, %Y") if pd.notna(d) else "Undated"
+        kind = "On-course" if str(sid).endswith("on_course") or "on_course" in str(sid) else "Practice"
+        label = f"{when}  ·  {kind}  ·  {n} shot{'s' if n != 1 else ''}"
+        rows.append((str(sid), label, n))
+
+    order = {sid: (date_by_sid.get(sid) or pd.Timestamp.min) for sid, *_ in rows}
+    rows.sort(key=lambda r: order[r[0]], reverse=True)
+    return rows
+
+
+def build_contribute_body(card, close):
+    """Fill the Contribute dropdown panel. ``card`` is an already-scrollable
+    body (see ui.components.DropdownPanel); ``close`` dismisses the panel."""
+    root = card.winfo_toplevel()
 
     theme.section_label(
         card, "Contribute to OpenGolfLab", color=Colors.ACCENT,
@@ -54,7 +90,7 @@ def open_contribute_dialog(root):
 
     theme.body_label(
         card, _INTRO, color=Colors.TEXT_PRIMARY,
-        wraplength=460, justify="left", anchor="w",
+        wraplength=420, justify="left", anchor="w",
     ).pack(anchor="w", pady=(0, 10))
 
     for title, detail in _POINTS:
@@ -63,7 +99,7 @@ def open_contribute_dialog(root):
         theme.section_label(row, f"{title}:", color=Colors.INFO).pack(anchor="w")
         theme.body_label(
             row, detail, color=Colors.TEXT_MUTED, font=theme.font("caption"),
-            wraplength=460, justify="left", anchor="w",
+            wraplength=420, justify="left", anchor="w",
         ).pack(anchor="w")
 
     theme.divider(card).pack(fill="x", pady=12)
@@ -81,34 +117,112 @@ def open_contribute_dialog(root):
         variable=consent_var, command=_toggle_consent,
     ).pack(anchor="w", pady=(0, 10))
 
+    # ---- round picker ----
+    theme.section_label(card, "Rounds to share", color=Colors.SUCCESS).pack(anchor="w", pady=(2, 2))
+
+    try:
+        df = load_master_dataframe(config.DATA_DIR)
+    except Exception:  # noqa: BLE001
+        df = pd.DataFrame()
+    sessions = _session_rows(df)
+
+    session_vars: dict[str, tk.BooleanVar] = {}
+    counts: dict[str, int] = {sid: n for sid, _lbl, n in sessions}
+
+    picker = ctk.CTkFrame(card, fg_color=Colors.BG_BASE, corner_radius=8)
+    picker.pack(fill="x", pady=(2, 4))
+
+    selected_label = theme.body_label(card, "", color=Colors.TEXT_MUTED,
+                                      font=theme.font("caption"), anchor="w", justify="left")
+
+    def _update_selected():
+        chosen = [sid for sid, v in session_vars.items() if v.get()]
+        shots = sum(counts.get(sid, 0) for sid in chosen)
+        if not chosen:
+            selected_label.configure(
+                text="No rounds selected — pick at least one round to share.")
+        else:
+            selected_label.configure(
+                text=f"Sending {shots} shot{'s' if shots != 1 else ''} "
+                     f"from {len(chosen)} round{'s' if len(chosen) != 1 else ''}.")
+        _refresh_button()
+
+    if not sessions:
+        theme.body_label(picker, "No rounds recorded yet — play a session first.",
+                         color=Colors.TEXT_MUTED, font=theme.font("caption")).pack(
+            anchor="w", padx=10, pady=10)
+    else:
+        actions = ctk.CTkFrame(picker, fg_color="transparent")
+        actions.pack(fill="x", padx=8, pady=(8, 2))
+
+        def _set_all(value: bool):
+            for v in session_vars.values():
+                v.set(value)
+            _update_selected()
+
+        theme.solid_button(actions, color=Colors.BG_HOVER, hover=Colors.BORDER, text="All",
+                           width=56, height=24, font=theme.font("caption"),
+                           command=lambda: _set_all(True)).pack(side="left", padx=(0, 4))
+        theme.solid_button(actions, color=Colors.BG_HOVER, hover=Colors.BORDER, text="None",
+                           width=56, height=24, font=theme.font("caption"),
+                           command=lambda: _set_all(False)).pack(side="left")
+
+        list_height = min(220, max(1, len(sessions)) * 32 + 8)
+        scroll = ctk.CTkScrollableFrame(picker, height=list_height, fg_color="transparent",
+                                        scrollbar_button_color=Colors.BG_HOVER)
+        scroll.pack(fill="x", padx=6, pady=(2, 8))
+        for sid, label, _n in sessions:
+            var = tk.BooleanVar(value=False)
+            session_vars[sid] = var
+            theme.nav_checkbox(scroll, text=label, variable=var,
+                               command=_update_selected).pack(anchor="w", pady=2, fill="x")
+
+    selected_label.pack(anchor="w", pady=(2, 10))
+
     # ---- optional handicap band ----
     theme.section_label(card, "Your handicap (optional)", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
     band_var = tk.StringVar(value="unknown")
-    theme.dropdown(card, list(contribute.HANDICAP_BANDS), band_var, width=200).pack(anchor="w", pady=(0, 12))
+    theme.dropdown(card, list(contribute.HANDICAP_BANDS), band_var, width=200).pack(anchor="w", pady=(0, 10))
+
+    # ---- optional launch monitor (drives the data-quality tier) ----
+    theme.section_label(card, "Your launch monitor (optional)", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
+    monitor_var = tk.StringVar(value="")
+    theme.dropdown(card, list(contribute.LAUNCH_MONITORS), monitor_var, width=200).pack(anchor="w", pady=(0, 2))
+    theme.body_label(
+        card, "Tells us how your spin was captured (measured vs. modeled), so "
+        "high-accuracy sessions can be weighted appropriately. Optional.",
+        color=Colors.TEXT_MUTED, font=theme.font("caption"),
+        wraplength=420, justify="left", anchor="w",
+    ).pack(anchor="w", pady=(0, 12))
 
     # ---- status line ----
     status = theme.body_label(card, "", color=Colors.TEXT_MUTED, font=theme.font("caption"),
-                              wraplength=460, justify="left", anchor="w")
+                              wraplength=420, justify="left", anchor="w")
     status.pack(anchor="w", pady=(0, 8))
 
     def _set_status(msg, color=Colors.TEXT_MUTED):
         status.configure(text=msg, text_color=color)
 
+    def _selected_ids() -> list[str]:
+        return [sid for sid, v in session_vars.items() if v.get()]
+
     # ---- actions ----
-    def _export():
+    def _guard() -> list[str] | None:
         if not consent_var.get():
-            _set_status("Turn on the opt-in above to export.", Colors.WARNING)
-            return
-        try:
-            df = load_master_dataframe(config.DATA_DIR)
-        except Exception as exc:  # noqa: BLE001
-            _set_status(f"Couldn't read your shot history: {exc}", Colors.WARNING)
-            return
-        if df is None or df.empty:
-            _set_status("No shots recorded yet — play a session first.", Colors.WARNING)
+            _set_status("Turn on the opt-in above to share.", Colors.WARNING)
+            return None
+        chosen = _selected_ids()
+        if not chosen:
+            _set_status("Pick at least one round to share.", Colors.WARNING)
+            return None
+        return chosen
+
+    def _export():
+        chosen = _guard()
+        if chosen is None:
             return
         out_root = filedialog.askdirectory(
-            parent=win, title="Choose where to save your contribution file",
+            parent=root, title="Choose where to save your contribution file",
         )
         if not out_root:
             return
@@ -116,7 +230,9 @@ def open_contribute_dialog(root):
             path = contribute.build_zip(
                 df, out_root, app_dir=app_dir,
                 handicap_band=band_var.get(),
+                launch_monitor=monitor_var.get(),
                 app_version=getattr(config, "APP_VERSION", ""),
+                session_ids=chosen,
             )
         except Exception as exc:  # noqa: BLE001
             _set_status(f"Couldn't save: {exc}", Colors.WARNING)
@@ -128,30 +244,24 @@ def open_contribute_dialog(root):
         )
 
     def _send():
-        if not consent_var.get():
-            _set_status("Turn on the opt-in above to share.", Colors.WARNING)
+        chosen = _guard()
+        if chosen is None:
             return
         url = getattr(config, "OPENGOLFLAB_INTAKE_URL", "")
         if not url:
             _set_status("Direct upload isn't set up in this build — use “Save a copy” instead.",
                         Colors.WARNING)
             return
-        try:
-            df = load_master_dataframe(config.DATA_DIR)
-        except Exception as exc:  # noqa: BLE001
-            _set_status(f"Couldn't read your shot history: {exc}", Colors.WARNING)
-            return
-        if df is None or df.empty:
-            _set_status("No shots recorded yet — play a session first.", Colors.WARNING)
-            return
         _set_status("Sending to OpenGolfLab…", Colors.TEXT_MUTED)
-        win.update_idletasks()
+        root.update_idletasks()
         try:
             res = contribute.send_bundle(
                 df, app_dir=app_dir, url=url,
                 key=getattr(config, "OPENGOLFLAB_INTAKE_KEY", "") or None,
                 handicap_band=band_var.get(),
+                launch_monitor=monitor_var.get(),
                 app_version=getattr(config, "APP_VERSION", ""),
+                session_ids=chosen,
             )
         except Exception as exc:  # noqa: BLE001
             _set_status(f"Upload failed: {exc}", Colors.WARNING)
@@ -169,14 +279,14 @@ def open_contribute_dialog(root):
                                     command=_export, width=120)
     save_btn.pack(side="right", padx=(6, 0))
     theme.outline_button(btns, accent=Colors.TEXT_MUTED, text="Close",
-                         command=win.destroy, width=90).pack(side="right")
+                         command=close, width=90).pack(side="right")
 
     def _refresh_button():
-        # Dim the action buttons until consent is on.
-        state = "normal" if consent_var.get() else "disabled"
+        # Enable the action buttons only once consent is on AND at least one
+        # round is selected — so nothing can be sent by accident.
+        ready = consent_var.get() and bool(_selected_ids())
+        state = "normal" if ready else "disabled"
         send_btn.configure(state=state)
         save_btn.configure(state=state)
 
-    _refresh_button()
-    win.after(120, lambda: (win.winfo_exists() and (win.lift(), win.focus_force())))
-    return win
+    _update_selected()

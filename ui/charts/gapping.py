@@ -14,6 +14,7 @@ import seaborn as sns
 from matplotlib.lines import Line2D
 
 from config import Colors, get_club_rank
+from data import units as units_mod
 from data.columns import CARRY_ALIASES, find_col
 from ui.charts._shared import attach_hover_tooltip, carry_points, plot_benchmarks, style_axes
 from ui.empty_state import show_message
@@ -33,14 +34,19 @@ def render(fig, df, club_colors, font_scale, config, **extra):
         show_message(fig, "No clubs selected", font_scale,
                      hint="Pick clubs from the menu in this panel's header")
         return
+    unit = extra.get("units", units_mod.YARDS)
+    df = units_mod.to_display_frame(df, unit)
+    u = units_mod.dist_suffix_lower(unit)
+    y_scale = units_mod.YARD_TO_M if units_mod.is_metric(unit) else 1.0
     ax = fig.add_subplot(111)
     carry_col = find_col(df, CARRY_ALIASES)
     legend_handles = []
-    # In a crowded 3-4 panel grid this chart's per-club "+/- vs even spacing"
-    # labels are the first thing to overlap (one per club, up to 15 of them).
-    # Drop just those text labels when the panel is small — the target dots and
-    # connectors stay, and the exact delta is still on each club's hover.
-    compact = config.get("num_plots", 1) >= 3
+    # This chart's per-club "+/- vs even spacing" labels (one per club, up to
+    # 15) are the first thing to overlap when the panel gets tight. Drop just
+    # those text labels once the panel shrinks enough that the font is small —
+    # the target dots and connectors stay, and the exact delta is still on each
+    # club's hover. font_scale tracks the panel's real geometry.
+    compact = font_scale <= 10
     if "club" in df.columns and carry_col:
         order = sorted(df["club"].dropna().unique(), key=get_club_rank)
 
@@ -83,12 +89,12 @@ def render(fig, df, club_colors, font_scale, config, **extra):
             lines = [
                 c,
                 f"Shots: {int(s['count'])}",
-                f"Avg carry: {s['mean']:.0f} yds",
-                f"Typical (median): {s['median']:.0f} yds",
+                f"Avg carry: {s['mean']:.0f} {u}",
+                f"Typical (median): {s['median']:.0f} {u}",
             ]
             if i + 1 < len(order) and order[i + 1] in stats.index:
                 gap = s["mean"] - stats.loc[order[i + 1], "mean"]
-                lines.append(f"Gap to {order[i + 1]}: {gap:+.0f} yds")
+                lines.append(f"Gap to {order[i + 1]}: {gap:+.0f} {u}")
             summary_lines[c] = lines
 
         ordered_means = [means.get(c, np.nan) for c in order]
@@ -109,7 +115,7 @@ def render(fig, df, club_colors, font_scale, config, **extra):
                         markeredgecolor="white", markeredgewidth=1.0, zorder=5)
                 delta = cur - target  # + = you carry past the target, - = short of it
                 if order[i] in summary_lines:
-                    summary_lines[order[i]].append(f"vs even spacing: {delta:+.0f} yds")
+                    summary_lines[order[i]].append(f"vs even spacing: {delta:+.0f} {u}")
                 if abs(delta) >= 0.5 and not compact:
                     ax.annotate(
                         f"{delta:+.0f}", (x, (target + cur) / 2),
@@ -128,7 +134,8 @@ def render(fig, df, club_colors, font_scale, config, **extra):
         # is on the right), drawn a bit larger than the default marker.
         legend_handles += plot_benchmarks(
             ax, extra.get("benchmarks", []),
-            lambda p: carry_points(p, order, x_of_index=lambda i, c: i - _GAP_DOT_OFFSET),
+            lambda p: carry_points(p, order, x_of_index=lambda i, c: i - _GAP_DOT_OFFSET,
+                                   y_scale=y_scale),
             size=95,
         )
 
@@ -145,5 +152,5 @@ def render(fig, df, club_colors, font_scale, config, **extra):
         leg.set_zorder(20)
 
     ax.set_xlabel("", fontsize=font_scale)
-    ax.set_ylabel("Carry (Yards)", fontsize=font_scale)
+    ax.set_ylabel(f"Carry ({units_mod.dist_suffix(unit)})", fontsize=font_scale)
     style_axes(ax, font_scale, grid="y")
