@@ -1,16 +1,17 @@
 # Golf Sim Analytics
 
-**Every shot. Every insight.** A Windows desktop analytics companion for [GSPro](https://gsprogolf.com/) golf simulators — it captures every shot you hit, automatically, and turns your practice into fifteen interactive dashboards.
+**Every shot. Every insight.** A Windows desktop analytics companion for [GSPro](https://gsprogolf.com/) golf simulators — it captures every shot you hit, automatically, and turns your practice into a suite of interactive dashboards.
 
 ![Landing page](docs/screenshots/home.jpg)
 
 ## Highlights
 
-- **Zero-click data capture.** GSPro's Practice Range "Export CSV" always saves to the Desktop — this app watches for it, ingests it, and refreshes within seconds. No import buttons, no file dialogs.
-- **Live round tracking.** Shots appear on the Live Dispersion chart in real time as you hit, with gauges tracking club speed against your personal best and the quality of your last strike. Finished rounds archive themselves.
-- **Deep per-shot analytics.** Hover any point for carry, ball speed, launch, descent, spin, and smash factor — each flagged against that club's ideal window.
+- **Zero-click data capture.** GSPro's Practice Range "Export CSV" always saves to the Desktop — this app watches for it, ingests it, and refreshes within seconds. Bringing older exports with you? Drag-and-drop them onto the window (or use the **Import CSV** button).
+- **Live round tracking.** Shots appear on the Live Dispersion chart in real time as you hit, with gauges tracking club speed against your personal best and the quality of your last strike. Rounds archive when GSPro starts the next one, or hit **End Round** to file the current one to your history immediately.
+- **Deep per-shot analytics.** Hover any point for carry, ball speed, launch, descent, spin, and smash factor — each flagged against that club's ideal window. Distances in yards or meters.
 - **Benchmarks.** Overlay PGA Tour averages or any handicap level (5–20) on your own numbers with one click.
 - **A built-in fitting bay.** Compare shafts / adapter settings head-to-head with live shot capture per configuration.
+- **Give back, on your terms.** Opt in to share anonymized shots with the [OpenGolfLab](https://opengolflab.com) community — you pick exactly which rounds — and browse the pooled community data in its own dashboard.
 - **Your data stays yours.** Everything lives in local Parquet files next to the app. Edits (hiding sessions, reassigning mis-clubbed shots) are reversible sidecars — the archived data is never touched.
 
 ## Dashboards
@@ -98,4 +99,13 @@ tests/            pytest suite
 ## Notes
 
 - Windows-only: the UI uses per-monitor DPI awareness, dark title-bar theming, and watches GSPro's per-user data folder — all Windows-specific.
-- Temperature normalization, warm-up shot filtering, and on-course/practice separation are all opt-in via **⚙ Settings**.
+- Temperature normalization, warm-up shot filtering, on-course/practice separation, and yards/meters units are all opt-in via **⚙ Settings**.
+- Live tracking reads GSPro's data folder (`%USERPROFILE%\AppData\LocalLow\GSPro\GSPro`, independent of where GSPro is installed). If your setup is non-standard, point the app at it under **⚙ Settings → GSPro connection**, which also shows whether the folder was found.
+
+## Contributing
+
+Bug reports and PRs are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the fork-and-PR workflow, and the privacy rules around contribution code. Security issues: see [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE) © OpenGolfLab. The OpenGolfLab community data pipeline (intake and read APIs) lives in separate repositories.

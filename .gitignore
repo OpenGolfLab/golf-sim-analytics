@@ -8,6 +8,11 @@ raw_csvs/
 parquet_data/
 logs/
 settings.json
+# Per-user OpenGolfLab contribution state — a random contributor id and the
+# local consent record. These are generated per install and must never be
+# shared (a committed id would attribute every cloner's uploads to one account).
+.contributor_id
+.contribute_consent
 
 # Sample-data runtime artifacts (the shipped .parquet files ARE committed;
 # anything the app writes into these folders at runtime is not)
