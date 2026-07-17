@@ -30,11 +30,17 @@ OPENGOLFLAB_INTAKE_KEY = ""
 # OpenGolfLab community data — powers the Community dashboard (see community.py +
 # docs/COMMUNITY_API.md). This is the directory that serves the PUBLIC aggregate
 # file community_points.json (per-contributor-club medians, built by the data
-# repo's aggregate.py and published to the website's public data). The app
-# appends the filename. It's a plain static file — no API, no auth. Until the
-# aggregator has published a pool, the fetch 404s and the dashboard shows its
-# empty state — never an error. Leave blank to force the offline state.
-OPENGOLFLAB_COMMUNITY_URL = "https://opengolflab.com/data"
+# repo's aggregate.py and published with the website). The app appends the
+# filename. It's a plain static file — no API, no auth. Until the aggregator has
+# published a pool, the fetch 404s and the dashboard shows its empty state —
+# never an error. Leave blank to force the offline state.
+#
+# This points at the site's workers.dev address rather than opengolflab.com on
+# purpose: the custom domain's Cloudflare zone serves a bot-challenge page to
+# non-browser clients (verified: the app's urllib fetch gets 403 there, while
+# this URL returns the JSON). Both are the same deployed Worker. If the zone
+# ever gets a WAF skip rule for /data/*, this can switch to the custom domain.
+OPENGOLFLAB_COMMUNITY_URL = "https://opengolflab.etsmith1414.workers.dev/data"
 
 
 # ---------------------------------------------------------------------------
