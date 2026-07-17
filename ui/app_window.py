@@ -698,13 +698,16 @@ class SimAnalyticsApp:
         panel = getattr(self, "_contribute_panel", None)
         if panel is None:
             # The name comes from the LIVE Settings var, evaluated on every
-            # open (build_content runs per open) — not from settings.json — so
-            # a name typed seconds ago shows here even if a disk write hasn't
-            # happened or failed.
+            # open (build_content runs per open), with the persisted setting as
+            # a fallback — so a name typed seconds ago shows here even if a
+            # disk write hasn't happened, and a name saved in a past session
+            # shows even if the var were somehow lost.
             panel = DropdownPanel(
                 self.data_button,
                 lambda card, close: build_contribute_body(
-                    card, close, configured_name=self.settings_display_name.get()),
+                    card, close,
+                    configured_name=(self.settings_display_name.get().strip()
+                                     or settings_mod.get("display_name"))),
                 width=430)
             self._contribute_panel = panel
         panel.toggle()
@@ -1717,7 +1720,15 @@ class SimAnalyticsApp:
         # "Manage sessions…" used to live here. It's an action on your data, not
         # a preference, so it moved to the Data menu with Import and Contribute.
 
-        theme.ghost_button(card, text="Close", command=close, width=100).pack(side="right")
+        footer = ctk.CTkFrame(card, fg_color="transparent")
+        footer.pack(fill="x", pady=(4, 0))
+        # Build identification — the one line that answers "is the exe I'm
+        # running actually the build with the fix?".
+        theme.body_label(
+            footer, f"Golf Sim Analytics v{getattr(config, 'APP_VERSION', '?')}",
+            color=Colors.TEXT_MUTED, font=theme.font("caption"),
+        ).pack(side="left")
+        theme.ghost_button(footer, text="Close", command=close, width=100).pack(side="right")
 
     def _sample_set_available(self) -> bool:
         """True if the selected demo dataset's folder exists with data in it;
