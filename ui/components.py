@@ -18,6 +18,8 @@ the same way:
 """
 from __future__ import annotations
 
+import os
+import sys
 import tkinter as tk
 import tkinter.font as tkfont
 
@@ -25,6 +27,51 @@ import customtkinter as ctk
 
 from config import Colors, FONT_FAMILY, FONT_SCALE
 from ui import theme
+
+
+def _foreground_is_this_app() -> bool:
+    """True while any window of THIS process is the foreground OS window.
+
+    The popups here are overrideredirect + topmost toplevels, which Windows
+    keeps above *every* application — so when the user clicks over to, say, a
+    browser, the browser covers the app but an open menu keeps floating on top
+    of it. Tk can't see that switch (the root's state stays "normal"; no Unmap
+    fires), but Win32 can: ask whose window is foreground and compare process
+    ids. Checking the pid rather than specific window handles means clicking
+    any of our own windows — the root, the popup itself, a native file dialog
+    we spawned — counts as "still us".
+
+    On non-Windows platforms (and on any Win32 hiccup) this returns True, so
+    the check degrades to a no-op rather than flapping menus shut.
+    """
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        fg = user32.GetForegroundWindow()
+        if not fg:
+            # Transient no-foreground states (alt-tab overlay mid-switch):
+            # don't judge, ask again next tick.
+            return True
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(fg, ctypes.byref(pid))
+        return pid.value == os.getpid()
+    except Exception:
+        return True
+
+
+def _root_hidden_or_backgrounded(root_widget) -> bool:
+    """Should an open popup close because the app is no longer what the user is
+    looking at? True when the main window is minimized/withdrawn OR another
+    application has become the foreground window."""
+    try:
+        state = root_widget.state()
+    except tk.TclError:
+        return True
+    if state in ("iconic", "withdrawn"):
+        return True
+    return not _foreground_is_this_app()
 
 
 def _fit_width(texts, extra: int = 24, min_w: int = 120, max_w: int = 360,
@@ -102,20 +149,15 @@ class _PopupDropdownBase(ctk.CTkFrame):
             self._close_popup()
 
     def _watch_root_state(self):
-        """Belt-and-braces for minimize: poll the main window's state while the
-        popup is open and close when it's no longer visible. The <Unmap> bind
-        above is the primary mechanism, but these popups are overrideredirect +
-        topmost windows — the one kind whose event delivery the OS shell is
-        allowed to get creative with — and a popup left floating over other
-        applications is bad enough to warrant a 150 ms heartbeat while open."""
+        """Close the popup the moment the app stops being what the user is
+        looking at — minimized, hidden, or another application brought to the
+        foreground. Polled at 150 ms while open, because Tk has no event for
+        the case that actually bites: switching to another app leaves the root
+        "normal" and fires nothing, while the topmost popup keeps floating
+        over the other application (see _foreground_is_this_app)."""
         if not self._popup_open():
             return
-        try:
-            state = self.winfo_toplevel().state()
-        except tk.TclError:
-            self._close_popup()
-            return
-        if state in ("iconic", "withdrawn"):
+        if _root_hidden_or_backgrounded(self.winfo_toplevel()):
             self._close_popup()
         else:
             self._popup.after(150, self._watch_root_state)
@@ -326,18 +368,12 @@ class DropdownPanel:
             self.close()
 
     def _watch_root_state(self):
-        """Belt-and-braces for minimize — see _PopupDropdownBase._watch_root_state.
-        Polls the main window's state while the panel is open; a panel left
-        floating over other applications after a minimize is the failure this
-        guards against, independent of <Unmap> delivery."""
+        """Close the panel when the app is minimized, hidden, or another
+        application takes the foreground — see
+        _PopupDropdownBase._watch_root_state for why this is a poll."""
         if not self.is_open():
             return
-        try:
-            state = self.anchor.winfo_toplevel().state()
-        except tk.TclError:
-            self.close()
-            return
-        if state in ("iconic", "withdrawn"):
+        if _root_hidden_or_backgrounded(self.anchor.winfo_toplevel()):
             self.close()
         else:
             self._popup.after(150, self._watch_root_state)
