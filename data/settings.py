@@ -38,6 +38,13 @@ DEFAULTS: dict = {
     # Display unit for distances (carry/total/offline/apex). Display-only — the
     # stored data and contributions stay in yards; see data/units.py.
     "units": "Yards",
+    # The public name shown beside your data on opengolflab.org. Blank means
+    # "none chosen": contribution then falls back to a name generated from the
+    # (random, non-identifying) contributor id, so a contribution always carries
+    # a name — see contribute.resolve_display_name. Validation of what may go in
+    # here lives in contribute.normalize_display_name, next to the code that
+    # puts it on the wire.
+    "display_name": "",
     # Override for GSPro's per-user data folder (where currentRound.dat /
     # GSPro.db / Player.log live) used by live tracking. Blank = the standard
     # auto-detected location (config.GSPRO_DEFAULT_DATA_DIR); only non-standard

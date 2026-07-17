@@ -14,7 +14,7 @@ Reuses the app's own column-alias resolution (data.columns) so it maps correctly
 regardless of how the launch monitor spelled each field.
 """
 from __future__ import annotations
-import os, json, uuid, datetime, zipfile
+import os, re, json, uuid, hashlib, datetime, zipfile
 import urllib.request, urllib.error
 import pandas as pd
 
@@ -24,9 +24,11 @@ from data.columns import (
     DESCENT_ANGLE_ALIASES, SPIN_RATE_ALIASES, START_DIR_ALIASES, SPIN_AXIS_ALIASES,
 )
 
-SCHEMA_VERSION = "1.2"   # 1.1 = structured environment.instrument (see instrument_block)
+SCHEMA_VERSION = "1.3"   # 1.1 = structured environment.instrument (see instrument_block)
                          # 1.2 = + instrument.verification (claimed monitor vs
                          #       the connectType GSPro's own log reported)
+                         # 1.3 = + display_name (the public name shown beside a
+                         #       contribution on opengolflab.org)
 CONSENT_POLICY_VERSION = "1.0"
 HANDICAP_BANDS = ["scratch", "1-4", "5-9", "10-14", "15-19", "20-24", "25+", "unknown"]
 
@@ -189,6 +191,82 @@ def get_contributor_uuid(app_dir: str) -> str:
         f.write(u)
     return u
 
+# ---------------------------------------------------------------------------
+# Display name — the ONE thing about a contribution that is deliberately public.
+#
+# Everything else in a bundle is anonymized by construction; this is the name a
+# contributor chooses to put on their data, shown next to it on opengolflab.org.
+# It is never derived from anything personal: either the user typed it, or it is
+# generated from the (random, non-identifying) contributor_uuid.
+#
+# There is intentionally no "anonymous" path. A contribution always carries a
+# name, because the feed is the verification loop — a contributor has to be able
+# to find their own row and check the numbers against what the app told them it
+# sent. A nameless row can't be found, and can't be checked.
+# ---------------------------------------------------------------------------
+DISPLAY_NAME_MIN = 3
+DISPLAY_NAME_MAX = 24
+# Letters, digits, space, hyphen, underscore. Deliberately no punctuation that
+# means anything in HTML/markup — the server sanitizes too (defense in depth),
+# but the app should never send something the server would have to clean up.
+_DISPLAY_NAME_RE = re.compile(r"^[A-Za-z0-9 _-]+$")
+
+# Short words so adjective+noun+"-abcd" always fits DISPLAY_NAME_MAX.
+_NAME_ADJECTIVES = [
+    "Steady", "Smooth", "Lofty", "Crisp", "Bold", "Quiet", "Swift", "Solid",
+    "Pure", "Keen", "Brisk", "Calm", "Sharp", "Bright", "Deft", "Easy",
+]
+_NAME_NOUNS = [
+    "Fade", "Draw", "Divot", "Wedge", "Mashie", "Niblick", "Birdie", "Eagle",
+    "Bunker", "Fairway", "Apex", "Spin", "Carry", "Loft", "Sweep", "Strike",
+]
+
+
+def normalize_display_name(raw: str) -> str | None:
+    """Return the cleaned display name, or None if it isn't a valid one.
+
+    Trims, collapses runs of whitespace (so " Big   Rig " and "Big Rig" are the
+    same name rather than two), then enforces length + charset.
+    """
+    name = " ".join(str(raw or "").split())
+    if not (DISPLAY_NAME_MIN <= len(name) <= DISPLAY_NAME_MAX):
+        return None
+    if not _DISPLAY_NAME_RE.match(name):
+        return None
+    return name
+
+
+def generated_display_name(contributor_uuid: str) -> str:
+    """A stable, friendly name derived from the contributor's own uuid, e.g.
+    'SteadyFade-3fa2'.
+
+    Deterministic on purpose: the same contributor gets the same generated name
+    on every contribution, so their rows in the public feed group under one
+    identity instead of scattering across a new random name each time. Uses
+    sha256 rather than hash() because hash() is salted per process and would
+    give a different name every launch.
+    """
+    h = hashlib.sha256(str(contributor_uuid).encode("utf-8")).hexdigest()
+    adj = _NAME_ADJECTIVES[int(h[0:8], 16) % len(_NAME_ADJECTIVES)]
+    noun = _NAME_NOUNS[int(h[8:16], 16) % len(_NAME_NOUNS)]
+    return f"{adj}{noun}-{h[16:20]}"
+
+
+def resolve_display_name(app_dir: str, configured: str = "") -> tuple[str, bool]:
+    """The name this contribution will actually carry: (name, was_generated).
+
+    `configured` is whatever the user has set in Settings. If it's blank or
+    invalid we fall back to the generated name rather than sending nothing —
+    see the module note above on why there's no nameless path. Callers show the
+    returned name to the user *before* they confirm, and use was_generated to
+    tell them where it came from.
+    """
+    name = normalize_display_name(configured)
+    if name is not None:
+        return name, False
+    return generated_display_name(get_contributor_uuid(app_dir)), True
+
+
 def has_consent(app_dir: str) -> bool:
     return os.path.exists(os.path.join(app_dir, ".contribute_consent"))
 
@@ -204,7 +282,7 @@ def record_consent(app_dir: str, accepted: bool) -> None:
 
 # ------------------------------------------------------- build the clean bundle
 def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monitor: str,
-             app_version: str, round_dp: int, session_ids=None):
+             app_version: str, round_dp: int, session_ids=None, display_name: str = ""):
     """Return (manifest_dict, clean_shots_dataframe). Requires consent.
 
     ``session_ids`` (an iterable of session_id values) restricts the bundle to
@@ -212,6 +290,10 @@ def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monit
     rounds the user explicitly picked, instead of their entire history. None
     (the default) keeps every session, preserving the old whole-history
     behaviour for any caller that wants it.
+
+    ``display_name`` is the user's configured name; blank or invalid resolves to
+    the generated one (see resolve_display_name), so the manifest always carries
+    a name.
     """
     if not has_consent(app_dir):
         raise PermissionError("Contribution is opt-in — call record_consent(app_dir, True) first.")
@@ -256,6 +338,8 @@ def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monit
         "schema_version": SCHEMA_VERSION,
         "app": {"name": "GolfSimAnalytics", "version": app_version},
         "contributor_uuid": get_contributor_uuid(app_dir),
+        # The only deliberately-public field in the bundle (v1.3).
+        "display_name": resolve_display_name(app_dir, display_name)[0],
         "created_date": datetime.date.today().isoformat(),
         "consent": {"policy_version": CONSENT_POLICY_VERSION, "accepted": True},
         "environment": {"platform": "GSPro", "instrument": {
@@ -278,48 +362,95 @@ def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monit
     return manifest, out
 
 
+# ---------------------------------------------------------------------------
+# The wire format, in one place.
+#
+# A bundle is exactly two files: manifest.json and shots.csv. Every path that
+# emits one — folder, zip, HTTP POST — serializes through these two helpers, so
+# "the .zip I saved" and "the bytes that were POSTed" are the same bytes by
+# construction rather than by two call sites happening to agree. That is what
+# makes the contribution receipt (write_receipt_zip) a real receipt: it is not a
+# re-derivation of what was probably sent, it is the thing that was sent.
+# ---------------------------------------------------------------------------
+def _manifest_bytes(manifest: dict) -> str:
+    return json.dumps(manifest, indent=2)
+
+
+def _shots_csv(out: pd.DataFrame) -> str:
+    return out.to_csv(index=False)
+
+
+def _write_zip(manifest: dict, shots_csv: str, path: str) -> str:
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", _manifest_bytes(manifest))
+        z.writestr("shots.csv", shots_csv)
+    return path
+
+
+def _zip_name(manifest: dict) -> str:
+    return f"opengolflab_{manifest['contributor_uuid'][:8]}_{manifest['created_date']}.zip"
+
+
+def write_receipt_zip(manifest: dict, shots_csv: str, out_root: str) -> str:
+    """Write the exact bundle described by (manifest, shots_csv) to out_root.
+
+    Takes the already-built payload rather than a DataFrame precisely so the
+    receipt can't drift from the upload: callers pass back what send_bundle
+    reported it sent. See the note above.
+    """
+    path = os.path.abspath(os.path.join(out_root, _zip_name(manifest)))
+    return _write_zip(manifest, shots_csv, path)
+
+
 def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
                  handicap_band: str = "unknown", launch_monitor: str = "",
-                 app_version: str = "", round_dp: int = 1, session_ids=None) -> str:
+                 app_version: str = "", round_dp: int = 1, session_ids=None,
+                 display_name: str = "") -> str:
     """Write an anonymized bundle folder to ``out_root`` and return its path."""
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
                              launch_monitor=launch_monitor, app_version=app_version,
-                             round_dp=round_dp, session_ids=session_ids)
+                             round_dp=round_dp, session_ids=session_ids,
+                             display_name=display_name)
     bundle_dir = os.path.join(out_root, f"{manifest['contributor_uuid'][:8]}_{manifest['created_date']}")
     os.makedirs(bundle_dir, exist_ok=True)
     with open(os.path.join(bundle_dir, "manifest.json"), "w") as f:
-        json.dump(manifest, f, indent=2)
-    out.to_csv(os.path.join(bundle_dir, "shots.csv"), index=False)
+        f.write(_manifest_bytes(manifest))
+    with open(os.path.join(bundle_dir, "shots.csv"), "w", newline="") as f:
+        f.write(_shots_csv(out))
     return bundle_dir
 
 
 def build_zip(df: pd.DataFrame, out_root: str, *, app_dir: str,
               handicap_band: str = "unknown", launch_monitor: str = "",
-              app_version: str = "", round_dp: int = 1, session_ids=None) -> str:
+              app_version: str = "", round_dp: int = 1, session_ids=None,
+              display_name: str = "") -> str:
     """Write a single self-contained .zip bundle into out_root; return its path."""
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
                              launch_monitor=launch_monitor, app_version=app_version,
-                             round_dp=round_dp, session_ids=session_ids)
-    name = f"opengolflab_{manifest['contributor_uuid'][:8]}_{manifest['created_date']}.zip"
-    path = os.path.abspath(os.path.join(out_root, name))
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("manifest.json", json.dumps(manifest, indent=2))
-        z.writestr("shots.csv", out.to_csv(index=False))
-    return path
+                             round_dp=round_dp, session_ids=session_ids,
+                             display_name=display_name)
+    return write_receipt_zip(manifest, _shots_csv(out), out_root)
 
 
 def send_bundle(df: pd.DataFrame, *, app_dir: str, url: str, key: str | None = None,
                 handicap_band: str = "unknown", launch_monitor: str = "",
                 app_version: str = "", round_dp: int = 1, timeout: int = 30,
-                session_ids=None) -> dict:
-    """POST an anonymized bundle to the intake Worker. Returns the parsed reply
-    (with shot_count). Raises RuntimeError on a network/server problem."""
+                session_ids=None, display_name: str = "") -> dict:
+    """POST an anonymized bundle to the intake Worker.
+
+    Returns the parsed reply, plus ``shot_count`` and — so the caller can offer
+    a receipt of exactly what left the machine — the ``manifest`` dict and
+    ``shots_csv`` string that were actually posted. Raises RuntimeError on a
+    network/server problem.
+    """
     if not url or not url.startswith("https://"):
         raise ValueError("Intake URL is not configured.")
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
                              launch_monitor=launch_monitor, app_version=app_version,
-                             round_dp=round_dp, session_ids=session_ids)
-    payload = json.dumps({"manifest": manifest, "shots_csv": out.to_csv(index=False)}).encode("utf-8")
+                             round_dp=round_dp, session_ids=session_ids,
+                             display_name=display_name)
+    shots_csv = _shots_csv(out)
+    payload = json.dumps({"manifest": manifest, "shots_csv": shots_csv}).encode("utf-8")
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
@@ -338,4 +469,11 @@ def send_bundle(df: pd.DataFrame, *, app_dir: str, url: str, key: str | None = N
         raise RuntimeError(f"Server rejected the upload ({e.code}): {detail[:200]}") from None
     except urllib.error.URLError as e:
         raise RuntimeError(f"Couldn't reach the server: {e.reason}") from None
-    return {"shot_count": manifest["shot_count"], **(data if isinstance(data, dict) else {})}
+    return {
+        "shot_count": manifest["shot_count"],
+        **(data if isinstance(data, dict) else {}),
+        # The exact payload, for the receipt. Last so a server reply can never
+        # overwrite our own record of what we sent.
+        "manifest": manifest,
+        "shots_csv": shots_csv,
+    }

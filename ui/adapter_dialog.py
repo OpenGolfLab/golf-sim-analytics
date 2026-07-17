@@ -68,8 +68,8 @@ def open_adapter_dialog(root, sessions, tags, on_save):
             on_save(sid, entry_var.get())
         win.destroy()
 
-    theme.outline_button(btns, accent=Colors.SUCCESS, text="Save", command=_save, width=100).pack(side="right", padx=(6, 0))
-    theme.outline_button(btns, accent=Colors.TEXT_MUTED, text="Cancel", command=win.destroy, width=100).pack(side="right")
+    theme.primary_button(btns, text="Save", command=_save, width=100).pack(side="right", padx=(6, 0))
+    theme.ghost_button(btns, text="Cancel", command=win.destroy, width=100).pack(side="right")
 
     win.after(120, lambda: (win.winfo_exists() and (win.lift(), win.focus_force())))
     return win

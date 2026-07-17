@@ -48,8 +48,10 @@ def show_toast(root, message: str, tone: str = "info", duration_ms: int = 4500) 
     _set_alpha(win, 0.0)
     win.configure(fg_color=Colors.BG_SURFACE)
 
-    card = ctk.CTkFrame(win, fg_color=Colors.BG_SURFACE, border_width=1,
-                        border_color=Colors.BORDER, corner_radius=10)
+    # Same surface treatment (radius, border) as every other floating card in
+    # the app — dropdown panels, tooltips, the shot-edit popup — by going
+    # through the one factory rather than restating the numbers here.
+    card = theme.card_frame(win)
     card.pack(fill="both", expand=True)
 
     # height=8 so the bar's 200px CTkFrame default doesn't inflate the card;

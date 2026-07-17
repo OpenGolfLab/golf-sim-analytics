@@ -29,8 +29,8 @@ def attach_tooltip(widget, text: str, delay_ms: int = 450, wraplength: int = 240
             tip.attributes("-topmost", True)
         except tk.TclError:
             pass
-        frame = ctk.CTkFrame(tip, fg_color=Colors.BG_SURFACE, border_width=1,
-                             border_color=Colors.BORDER, corner_radius=8)
+        # One surface treatment for every floating card (see theme.card_frame).
+        frame = theme.card_frame(tip)
         frame.pack(fill="both", expand=True)
         ctk.CTkLabel(frame, text=text, text_color=Colors.TEXT_PRIMARY,
                      font=theme.font("body"), wraplength=wraplength,

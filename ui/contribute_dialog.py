@@ -37,7 +37,8 @@ _INTRO = (
 )
 _POINTS = [
     ("Shared", "club, ball & club speed, launch, spin, carry and similar per-shot numbers — plus an optional handicap band you pick."),
-    ("Never shared", "your name, email, files, or anything identifying. No account, no tracking."),
+    ("Shown publicly", "your display name (below) is published next to your data on opengolflab.org. Nothing else identifies you."),
+    ("Never shared", "your real name, email, files, or anything identifying. No account, no tracking."),
     ("How it's used", "only combined community averages are ever published on opengolflab.com. Your raw shots stay private and are never sold."),
     ("Your choice", "sharing is off unless you turn it on, you pick which rounds go, and you can stop anytime."),
 ]
@@ -104,8 +105,31 @@ def build_contribute_body(card, close):
 
     theme.divider(card).pack(fill="x", pady=12)
 
-    # ---- opt-in ----
     app_dir = str(config.BASE_DIR)
+
+    # ---- who you're contributing as ----
+    # The name that will appear publicly, shown *before* anything is sent. If the
+    # user never set one, this is where they find out a name was generated for
+    # them — and are pointed at Settings to change it — rather than discovering
+    # it after the fact on the website.
+    from data import settings as settings_mod
+    configured_name = settings_mod.get("display_name")
+    active_name, was_generated = contribute.resolve_display_name(app_dir, configured_name)
+
+    theme.section_label(card, "Contributing as", color=Colors.SUCCESS).pack(anchor="w", pady=(2, 2))
+    theme.body_label(card, active_name, color=Colors.TEXT_ACTIVE,
+                     font=theme.font("subheading", "bold")).pack(anchor="w")
+    if was_generated:
+        who_note = ("A name was generated for you. Set your own in "
+                    "Settings → Display name — it's shown publicly on opengolflab.org.")
+    else:
+        who_note = "Shown publicly next to your data on opengolflab.org."
+    theme.body_label(card, who_note, color=Colors.TEXT_MUTED, font=theme.font("caption"),
+                     wraplength=420, justify="left", anchor="w").pack(anchor="w", pady=(2, 10))
+
+    theme.divider(card).pack(fill="x", pady=12)
+
+    # ---- opt-in ----
     consent_var = tk.BooleanVar(value=contribute.has_consent(app_dir))
 
     def _toggle_consent():
@@ -129,7 +153,7 @@ def build_contribute_body(card, close):
     session_vars: dict[str, tk.BooleanVar] = {}
     counts: dict[str, int] = {sid: n for sid, _lbl, n in sessions}
 
-    picker = ctk.CTkFrame(card, fg_color=Colors.BG_BASE, corner_radius=8)
+    picker = ctk.CTkFrame(card, fg_color=Colors.BG_BASE, corner_radius=theme.SURFACE_RADIUS)
     picker.pack(fill="x", pady=(2, 4))
 
     selected_label = theme.body_label(card, "", color=Colors.TEXT_MUTED,
@@ -232,7 +256,7 @@ def build_contribute_body(card, close):
                 handicap_band=band_var.get(),
                 launch_monitor=monitor_var.get(),
                 app_version=getattr(config, "APP_VERSION", ""),
-                session_ids=chosen,
+                session_ids=chosen, display_name=configured_name,
             )
         except Exception as exc:  # noqa: BLE001
             _set_status(f"Couldn't save: {exc}", Colors.WARNING)
@@ -242,6 +266,10 @@ def build_contribute_body(card, close):
             "Thank you for contributing!",
             Colors.SUCCESS,
         )
+
+    # After a successful upload we hold onto exactly what was sent, so the two
+    # receipt buttons below export the real payload rather than rebuilding it.
+    sent_payload: dict = {}
 
     def _send():
         chosen = _guard()
@@ -261,25 +289,97 @@ def build_contribute_body(card, close):
                 handicap_band=band_var.get(),
                 launch_monitor=monitor_var.get(),
                 app_version=getattr(config, "APP_VERSION", ""),
-                session_ids=chosen,
+                session_ids=chosen, display_name=configured_name,
             )
         except Exception as exc:  # noqa: BLE001
             _set_status(f"Upload failed: {exc}", Colors.WARNING)
             return
         n = res.get("shot_count", "your")
-        _set_status(f"Sent {n} shots to OpenGolfLab — thank you for contributing!", Colors.SUCCESS)
+        sent_payload["manifest"] = res.get("manifest")
+        sent_payload["shots_csv"] = res.get("shots_csv")
+        _set_status(
+            f"Sent {n} shots to OpenGolfLab as “{active_name}” — thank you for "
+            "contributing!\nUse the buttons below to save a receipt of exactly "
+            "what was sent, and what the site will show for you.",
+            Colors.SUCCESS)
+        _refresh_receipts()
 
     btns = ctk.CTkFrame(card, fg_color="transparent")
     btns.pack(fill="x", pady=(4, 0))
 
-    send_btn = theme.outline_button(btns, accent=Colors.SUCCESS, text="Send to OpenGolfLab",
+    send_btn = theme.primary_button(btns, text="Send to OpenGolfLab",
                                     command=_send, width=180)
     send_btn.pack(side="right", padx=(6, 0))
-    save_btn = theme.outline_button(btns, accent=Colors.INFO, text="Save a copy…",
-                                    command=_export, width=120)
+    save_btn = theme.ghost_button(btns, text="Save a copy…",
+                                  command=_export, width=120)
     save_btn.pack(side="right", padx=(6, 0))
-    theme.outline_button(btns, accent=Colors.TEXT_MUTED, text="Close",
-                         command=close, width=90).pack(side="right")
+    theme.ghost_button(btns, text="Close",
+                       command=close, width=90).pack(side="right")
+
+    # ---- receipts (the verification loop) ----
+    # Two exports offered only after a successful send: the exact bytes that were
+    # posted, and what opengolflab.org will publish for this contributor once it
+    # aggregates them. The second is computed with the same rules as the site
+    # (site_preview, a port of aggregate.py) so a person can reconcile the public
+    # number against their own machine. See site_preview.py.
+    theme.divider(card).pack(fill="x", pady=(12, 8))
+    theme.section_label(card, "After sending — save a receipt",
+                        color=Colors.INFO).pack(anchor="w", pady=(0, 2))
+    theme.body_label(
+        card, "Keep a record of exactly what you contributed, and check it "
+        "against what the site publishes for you.",
+        color=Colors.TEXT_MUTED, font=theme.font("caption"),
+        wraplength=420, justify="left", anchor="w").pack(anchor="w", pady=(0, 6))
+
+    receipt_btns = ctk.CTkFrame(card, fg_color="transparent")
+    receipt_btns.pack(fill="x", pady=(0, 4))
+
+    def _save_sent_payload():
+        m, csv_text = sent_payload.get("manifest"), sent_payload.get("shots_csv")
+        if not m:
+            return
+        out_root = filedialog.askdirectory(
+            parent=root, title="Save a copy of exactly what was sent")
+        if not out_root:
+            return
+        try:
+            path = contribute.write_receipt_zip(m, csv_text, out_root)
+        except Exception as exc:  # noqa: BLE001
+            _set_status(f"Couldn't save the receipt: {exc}", Colors.WARNING)
+            return
+        _set_status(f"Saved what was sent:\n{path}", Colors.SUCCESS)
+
+    def _save_site_preview():
+        m, csv_text = sent_payload.get("manifest"), sent_payload.get("shots_csv")
+        if not m:
+            return
+        import site_preview
+        path = filedialog.asksaveasfilename(
+            parent=root, title="Save the site preview",
+            defaultextension=".json",
+            initialfile=f"opengolflab_site_preview_{m.get('created_date', '')}.json",
+            filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(site_preview.preview_json(csv_text, m))
+        except Exception as exc:  # noqa: BLE001
+            _set_status(f"Couldn't save the preview: {exc}", Colors.WARNING)
+            return
+        _set_status(f"Saved the site preview:\n{path}", Colors.SUCCESS)
+
+    sent_btn = theme.ghost_button(receipt_btns, text="Export what was sent",
+                                  command=_save_sent_payload, width=180)
+    sent_btn.pack(side="left", padx=(0, 6))
+    preview_btn = theme.ghost_button(receipt_btns, text="Export site preview",
+                                     command=_save_site_preview, width=170)
+    preview_btn.pack(side="left")
+
+    def _refresh_receipts():
+        state = "normal" if sent_payload.get("manifest") else "disabled"
+        sent_btn.configure(state=state)
+        preview_btn.configure(state=state)
 
     def _refresh_button():
         # Enable the action buttons only once consent is on AND at least one
@@ -289,4 +389,5 @@ def build_contribute_body(card, close):
         send_btn.configure(state=state)
         save_btn.configure(state=state)
 
+    _refresh_receipts()
     _update_selected()

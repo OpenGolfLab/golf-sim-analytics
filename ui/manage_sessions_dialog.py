@@ -28,11 +28,15 @@ def build_manage_sessions_body(card, close, sessions, on_toggle):
         theme.body_label(card, "No sessions yet.", color=Colors.TEXT_MUTED).pack(pady=20)
 
     for sid, label, is_deleted in sessions:
-        row = ctk.CTkFrame(card, fg_color=Colors.BG_HOVER, corner_radius=8)
+        row = ctk.CTkFrame(card, fg_color=Colors.BG_HOVER, corner_radius=theme.CONTROL_RADIUS)
         row.pack(fill="x", pady=3)
         lbl = theme.body_label(row, label, color=Colors.TEXT_PRIMARY)
         lbl.pack(side="left", padx=12, pady=8)
-        btn = theme.outline_button(row, accent=Colors.DANGER, text="", width=90)
+        # A ghost button, not theme.danger_button: this control *toggles* between
+        # Delete (red) and Restore (green), and danger_button forces its label
+        # back to red on mouse-leave — which would wipe the green Restore state.
+        # So the row owns its own semantic colors via _refresh below.
+        btn = theme.ghost_button(row, text="", width=90)
 
         def _make(sid=sid, lbl=lbl, btn=btn, state={"deleted": is_deleted}):
             def _refresh():
@@ -50,5 +54,5 @@ def build_manage_sessions_body(card, close, sessions, on_toggle):
         btn.configure(command=_make())
         btn.pack(side="right", padx=10, pady=6)
 
-    theme.outline_button(card, accent=Colors.TEXT_MUTED, text="Close",
+    theme.ghost_button(card, text="Close",
                          command=close, width=100).pack(side="right", pady=(10, 0))
