@@ -79,9 +79,15 @@ def _session_rows(df: pd.DataFrame) -> list[tuple[str, str, int]]:
     return rows
 
 
-def build_contribute_body(card, close):
+def build_contribute_body(card, close, configured_name: str | None = None):
     """Fill the Contribute dropdown panel. ``card`` is an already-scrollable
-    body (see ui.components.DropdownPanel); ``close`` dismisses the panel."""
+    body (see ui.components.DropdownPanel); ``close`` dismisses the panel.
+
+    ``configured_name`` is the user's display name as currently held by the
+    app (the live Settings var). Passing it beats re-reading settings.json:
+    the persisted copy can lag or fail, and the live value cannot. None falls
+    back to the persisted setting (standalone callers, tests).
+    """
     root = card.winfo_toplevel()
 
     theme.section_label(
@@ -112,8 +118,9 @@ def build_contribute_body(card, close):
     # user never set one, this is where they find out a name was generated for
     # them — and are pointed at Settings to change it — rather than discovering
     # it after the fact on the website.
-    from data import settings as settings_mod
-    configured_name = settings_mod.get("display_name")
+    if configured_name is None:
+        from data import settings as settings_mod
+        configured_name = settings_mod.get("display_name")
     active_name, was_generated = contribute.resolve_display_name(app_dir, configured_name)
 
     theme.section_label(card, "Contributing as", color=Colors.SUCCESS).pack(anchor="w", pady=(2, 2))
