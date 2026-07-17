@@ -200,16 +200,18 @@ def plot_benchmarks(ax, benchmarks, point_fn, zorder=6, size=_STAR_AREA):
     return handles
 
 
-def carry_points(profile_name, order, x_of_index=lambda i, c: i):
+def carry_points(profile_name, order, x_of_index=lambda i, c: i, y_scale=1.0):
     """Convenience point_fn builder for carry-vs-club charts: yields
     (x, carry) for each club in `order` that this profile has a carry for.
-    `x_of_index(index, club)` maps a club's ordinal position to its x."""
+    `x_of_index(index, club)` maps a club's ordinal position to its x.
+    `y_scale` converts the benchmark carry (stored in yards) into the chart's
+    display unit — pass units.YARD_TO_M when the chart is showing meters."""
     prof = REFERENCE_PROFILES.get(profile_name, {})
     pts = []
     for i, club in enumerate(order):
         m = prof.get(club)
         if m is not None and m.carry is not None:
-            pts.append((x_of_index(i, club), m.carry))
+            pts.append((x_of_index(i, club), m.carry * y_scale))
     return pts
 
 

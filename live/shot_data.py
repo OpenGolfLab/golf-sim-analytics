@@ -60,6 +60,10 @@ def flatten_shot(raw_shot: dict, club_lookup=None) -> dict:
     club_index = raw_shot.get("ClubIndex")
     club = normalize_club_name(resolve_club_index(club_index))
 
+    # currentRound.dat is GSPro's fixed internal store — always yards, no unit
+    # marker (GSPro localizes to metric only when it formats a CSV export, not
+    # here; see data/units.py). So live-tracked distances need no unit detection,
+    # unlike CSV ingest (data.io._detect_csv_distance_unit).
     carry = gd.get("cy")  # carry yardage
     az = gd.get("az")  # side/azimuth angle in degrees (GSPro's HLA equivalent)
     # Approximation: real launch-monitor CSVs report a measured "offline"

@@ -9,6 +9,19 @@ def test_get_club_rank_unknown_club_sorts_last():
     assert get_club_rank("Putter") == 99
 
 
+def test_club_index_26_resolves_to_putter_not_lob_wedge():
+    # ClubIndex 26 is the putter (its ball data is copied from the prior shot),
+    # not a lob wedge — 25 is the real lob wedge.
+    assert resolve_club_index(26) == "Putter"
+    assert resolve_club_index(25) == "Lw"
+
+
+def test_putter_is_non_swing_but_not_a_canonical_club():
+    import config
+    assert "Putter" in config.NON_SWING_CLUBS
+    assert "Putter" not in config.CANONICAL_CLUBS
+
+
 def test_get_fitting_window_driver():
     launch, height, descent = get_fitting_window("DR")
     assert launch == (10, 14)

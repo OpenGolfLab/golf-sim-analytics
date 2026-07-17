@@ -96,8 +96,11 @@ def load_master_dataframe(data_dir: Path) -> pd.DataFrame:
         # an unmapped launch-monitor slot ("Club8"). These are never real
         # clubs, and left in they pollute every per-club axis, legend, and
         # fitting band. The Parquet files are untouched; this is load-time only.
-        from config import CANONICAL_CLUBS
-        valid = df["club"].isin(CANONICAL_CLUBS)
+        from config import CANONICAL_CLUBS, NON_SWING_CLUBS
+        # "Putter" isn't a swing club but is a legitimate on-course stroke the
+        # scorecard needs — keep it here; the swing dashboards / contribution
+        # filter it out themselves (see data.on_course.exclude_putts).
+        valid = df["club"].isin(CANONICAL_CLUBS) | df["club"].isin(NON_SWING_CLUBS)
         if not valid.all():
             dropped = df.loc[~valid, "club"].value_counts()
             log.warning(
@@ -176,10 +179,12 @@ class PlayerRecords:
         self.max_ball_speed = max_ball_speed
 
 
-def compute_player_records(df: pd.DataFrame) -> PlayerRecords:
+def compute_player_records(df: pd.DataFrame, unit: str = "Yards") -> PlayerRecords:
+    from data import units as units_mod
     if df.empty:
         return PlayerRecords()
 
+    dist_u = units_mod.dist_suffix(unit)
     total_col = find_col(df, ["total", "totaldistance"]) or find_col(df, CARRY_ALIASES)
     cs_col = find_col(df, CLUB_SPEED_ALIASES)
 
@@ -192,17 +197,17 @@ def compute_player_records(df: pd.DataFrame) -> PlayerRecords:
     if bs_col and not df[bs_col].dropna().empty:
         r_ball = f"{df[bs_col].max():.1f} MPH"
 
-    r_drive = "--- Yds"
-    r_theoretical_max = "--- Yds"
+    r_drive = f"--- {dist_u}"
+    r_theoretical_max = f"--- {dist_u}"
     if "club" in df.columns:
         dr_df = df[df["club"].astype(str).str.upper().str.contains("DR", na=False)]
         if total_col and not dr_df.empty:
-            r_drive = f"{dr_df[total_col].max():.1f} Yds"
+            r_drive = f"{units_mod.to_display(dr_df[total_col].max(), unit):.1f} {dist_u}"
         if cs_col and not dr_df.empty:
             dr_speeds = dr_df[cs_col].dropna()
             if not dr_speeds.empty:
                 yards = theoretical_max_drive_yards(dr_speeds.max())
-                r_theoretical_max = f"{yards:.0f} Yds"
+                r_theoretical_max = f"{units_mod.to_display(yards, unit):.0f} {dist_u}"
 
     return PlayerRecords(longest_drive=r_drive, max_club_speed=r_speed,
                           theoretical_max_drive=r_theoretical_max, max_ball_speed=r_ball)

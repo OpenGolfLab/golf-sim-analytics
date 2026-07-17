@@ -136,6 +136,43 @@ def test_finalize_now_flushes_in_progress_buffer(tmp_path):
     assert watcher._buffer == []
 
 
+def test_finalize_now_returns_summary_or_none(tmp_path):
+    # The explicit "End Round" UI action relies on this return value to tell
+    # the user whether anything was actually archived.
+    watcher, round_file, *_ , new_shots, archived = _make_watcher(tmp_path)
+    _write(round_file, [_shot("a"), _shot("b")])
+    watcher.check_now()
+
+    info = watcher.finalize_now()
+    assert info is not None and info["shot_count"] == 2
+
+    # Nothing new buffered -> a second call reports "nothing to do".
+    assert watcher.finalize_now() is None
+
+
+def test_explicit_finalize_then_new_round_does_not_double_archive(tmp_path):
+    # "End Round" (explicit finalize) mid-session, then GSPro starts a fresh
+    # round: the ended round must archive exactly once, and the new round
+    # archives on its own — never the old one a second time.
+    watcher, round_file, data_dir, raw_dir, new_shots, archived = _make_watcher(tmp_path)
+    _write(round_file, [_shot("a"), _shot("b")])
+    watcher.check_now()
+
+    assert watcher.finalize_now()["shot_count"] == 2  # explicit End Round
+    assert len(archived) == 1
+    assert watcher.finalize_now() is None  # e.g. later app-shutdown flush: no-op
+    assert len(archived) == 1
+
+    time.sleep(0.01)
+    _write(round_file, [_shot("c"), _shot("d")])  # fresh first ShotID => new round
+    watcher.check_now()
+    watcher.finalize_now()
+
+    assert len(archived) == 2
+    assert archived[1]["shot_count"] == 2
+    assert {s["shot_id"] for s in new_shots} == {"c", "d"}
+
+
 def test_restarting_watcher_does_not_rearchive_unchanged_stale_round(tmp_path):
     # Simulates: app closes (archiving whatever was buffered), then the app
     # is relaunched later while GSPro is idle and currentRound.dat hasn't

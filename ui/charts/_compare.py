@@ -16,6 +16,7 @@ import seaborn as sns
 from matplotlib.colors import LinearSegmentedColormap, to_rgba
 
 from config import Colors
+from data import units as units_mod
 from data.columns import (
     BALL_SPEED_ALIASES, CARRY_ALIASES, CLUB_SPEED_ALIASES, LAUNCH_ANGLE_ALIASES,
     OFFLINE_ALIASES, SMASH_FACTOR_ALIASES, SPIN_RATE_ALIASES, find_col,
@@ -66,9 +67,10 @@ def _smash(df, smash_col, bs_col, cs_col):
     return float(s.mean()) if not s.empty else None
 
 
-def render_comparison(fig, groups, font_scale, empty_msg, subtitle=None):
+def render_comparison(fig, groups, font_scale, empty_msg, subtitle=None,
+                      unit=units_mod.YARDS):
     """groups: list of (label, sub_df, color). Empty groups are dropped."""
-    groups = [(lbl, sub, col) for (lbl, sub, col) in groups
+    groups = [(lbl, units_mod.to_display_frame(sub, unit), col) for (lbl, sub, col) in groups
               if sub is not None and not sub.empty]
     if not groups:
         show_message(fig, empty_msg, font_scale)
@@ -114,7 +116,7 @@ def render_comparison(fig, groups, font_scale, empty_msg, subtitle=None):
                 ax.scatter([mx], [my], marker="X", s=220, color=col,
                            edgecolor="white", linewidth=1.4, zorder=5)
 
-        _axes_like_dispersion(ax, all_df, offline_col, carry_col, font_scale)
+        _axes_like_dispersion(ax, all_df, offline_col, carry_col, font_scale, unit)
         handles, _labels = ax.get_legend_handles_labels()
         if handles:
             leg = ax.legend(loc="lower right", fontsize=max(8, font_scale - 2),
@@ -123,10 +125,10 @@ def render_comparison(fig, groups, font_scale, empty_msg, subtitle=None):
             leg.set_zorder(20)
 
     _draw_table(ax_t, groups, font_scale, carry_col, bs_col, vla_col, spin_col,
-                smash_col, cs_col, subtitle)
+                smash_col, cs_col, subtitle, unit)
 
 
-def _axes_like_dispersion(ax, all_df, offline_col, carry_col, font_scale):
+def _axes_like_dispersion(ax, all_df, offline_col, carry_col, font_scale, unit=units_mod.YARDS):
     # Zoom out for a birds-eye view — more fairway around the shots rather
     # than cropping tight to them.
     max_off = all_df[offline_col].abs().max()
@@ -148,14 +150,14 @@ def _axes_like_dispersion(ax, all_df, offline_col, carry_col, font_scale):
                 ax.axhline(y=yd, color=Colors.GRID, linestyle="-", linewidth=0.8, alpha=0.5, zorder=0.1)
         ax.set_yticks(range(y_start, y_end + 25, 25))
 
-    ax.set_xlabel("Offline (Yards)", fontsize=font_scale)
-    ax.set_ylabel("Carry (Yards)", fontsize=font_scale)
+    ax.set_xlabel(f"Offline ({units_mod.dist_suffix(unit)})", fontsize=font_scale)
+    ax.set_ylabel(f"Carry ({units_mod.dist_suffix(unit)})", fontsize=font_scale)
     style_axes(ax, font_scale, grid=None)
     ax.grid(axis="x", linestyle=":", alpha=0.3, zorder=0)
 
 
 def _draw_table(ax, groups, font_scale, carry_col, bs_col, vla_col, spin_col,
-                smash_col, cs_col, subtitle):
+                smash_col, cs_col, subtitle, unit=units_mod.YARDS):
     def mean(sub, col):
         if not col or sub.empty:
             return None
@@ -165,7 +167,7 @@ def _draw_table(ax, groups, font_scale, carry_col, bs_col, vla_col, spin_col,
     smash_vals = [_smash(sub, smash_col, bs_col, cs_col) for (_l, sub, _c) in groups]
     # (label, unit, column, format)
     metrics = [
-        ("Carry", "yds", carry_col, "{:.0f}"),
+        ("Carry", units_mod.dist_suffix_lower(unit), carry_col, "{:.0f}"),
         ("Ball Spd", "mph", bs_col, "{:.0f}"),
         ("Launch", "°", vla_col, "{:.1f}"),
         ("Spin", "rpm", spin_col, "{:.0f}"),

@@ -17,7 +17,10 @@ if errorlevel 1 goto :fail
 
 REM Step 2: Compile the executable
 echo Building executable (this can take a few minutes)...
-python -m PyInstaller --noconsole --onefile --icon "assets\icon.ico" --add-data "assets;assets" --name "GolfSimAnalytics" app.py
+REM --collect-all tkinterdnd2 bundles its native tkdnd Tcl binaries so
+REM drag-and-drop CSV import works in the packaged exe (the app falls back
+REM to the file picker if they're ever missing, so this is belt-and-braces).
+python -m PyInstaller --noconsole --onefile --icon "assets\icon.ico" --add-data "assets;assets" --collect-all tkinterdnd2 --name "GolfSimAnalytics" app.py
 if errorlevel 1 goto :fail
 
 REM Step 3: Ship everything the app looks for NEXT TO the exe, so the

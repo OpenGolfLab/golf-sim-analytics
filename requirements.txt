@@ -6,3 +6,4 @@ seaborn>=0.13
 pyarrow>=14
 customtkinter>=5.2
 pillow>=10
+tkinterdnd2>=0.4  # drag-and-drop CSV import (optional; app falls back if absent)

@@ -220,6 +220,27 @@ def test_load_master_drops_missing_clubs_and_future_dates(tmp_path):
     assert out.loc[out["club"] == "7I", "session_date"].isna().all()
 
 
+def test_load_master_retags_and_keeps_putter_from_club_index(tmp_path):
+    # On-course putts are archived with ClubIndex 26. The old map mislabeled
+    # them "Lw"; they must now re-resolve to "Putter" on load (self-healing old
+    # data) and be KEPT (not dropped like junk labels) so the scorecard can
+    # still count the stroke.
+    from data.store import load_master_dataframe
+
+    df = pd.DataFrame({
+        "club": ["Dr", "Lw"],          # stale label from the old ClubIndex map
+        "club_index": [0, 26],          # 26 = putter
+        "carry": [250.0, 11.0],
+        "session_date": [pd.Timestamp("2026-01-01")] * 2,
+        "session_id": ["live-a-on_course"] * 2,
+    })
+    df.to_parquet(tmp_path / "s.parquet", index=False)
+
+    out = load_master_dataframe(tmp_path)
+
+    assert sorted(out["club"]) == ["Dr", "Putter"]  # putt kept + retagged
+
+
 def test_load_master_normalizes_launch_monitor_club_spelling(tmp_path):
     # Reproduces real archived data: the same physical clubs recorded
     # under multiple raw spellings ("I9" vs "9I", "DR" vs "Dr", "W3" vs

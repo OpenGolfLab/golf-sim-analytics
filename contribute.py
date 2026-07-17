@@ -204,14 +204,33 @@ def record_consent(app_dir: str, accepted: bool) -> None:
 
 # ------------------------------------------------------- build the clean bundle
 def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monitor: str,
-             app_version: str, round_dp: int):
-    """Return (manifest_dict, clean_shots_dataframe). Requires consent."""
+             app_version: str, round_dp: int, session_ids=None):
+    """Return (manifest_dict, clean_shots_dataframe). Requires consent.
+
+    ``session_ids`` (an iterable of session_id values) restricts the bundle to
+    just those rounds — this is what lets the Contribute dialog send only the
+    rounds the user explicitly picked, instead of their entire history. None
+    (the default) keeps every session, preserving the old whole-history
+    behaviour for any caller that wants it.
+    """
     if not has_consent(app_dir):
         raise PermissionError("Contribution is opt-in — call record_consent(app_dir, True) first.")
 
+    if session_ids is not None:
+        wanted = {str(s) for s in session_ids}
+        if "session_id" not in df.columns:
+            raise ValueError("Can't select rounds — this data has no session_id column.")
+        df = df[df["session_id"].astype(str).isin(wanted)]
+        if df.empty:
+            raise ValueError("None of the selected rounds have any shots to contribute.")
+
+    # Putts (and any other non-swing strokes tagged "Putter") are on-course
+    # scoring artifacts with launch data copied from the preceding shot — never
+    # real launch-monitor shots — so they must never reach the community set.
     club_col = find_col(df, CLUB_ALIASES)
     if club_col is None:
         raise ValueError("No club column found in the shot data.")
+    df = df[df[club_col].astype(str).str.strip().str.casefold() != "putter"]
 
     out = pd.DataFrame()
     out["club"] = df[club_col].astype(str).str.strip()
@@ -261,10 +280,11 @@ def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monit
 
 def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
                  handicap_band: str = "unknown", launch_monitor: str = "",
-                 app_version: str = "", round_dp: int = 1) -> str:
+                 app_version: str = "", round_dp: int = 1, session_ids=None) -> str:
     """Write an anonymized bundle folder to ``out_root`` and return its path."""
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
-                             launch_monitor=launch_monitor, app_version=app_version, round_dp=round_dp)
+                             launch_monitor=launch_monitor, app_version=app_version,
+                             round_dp=round_dp, session_ids=session_ids)
     bundle_dir = os.path.join(out_root, f"{manifest['contributor_uuid'][:8]}_{manifest['created_date']}")
     os.makedirs(bundle_dir, exist_ok=True)
     with open(os.path.join(bundle_dir, "manifest.json"), "w") as f:
@@ -275,10 +295,11 @@ def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
 
 def build_zip(df: pd.DataFrame, out_root: str, *, app_dir: str,
               handicap_band: str = "unknown", launch_monitor: str = "",
-              app_version: str = "", round_dp: int = 1) -> str:
+              app_version: str = "", round_dp: int = 1, session_ids=None) -> str:
     """Write a single self-contained .zip bundle into out_root; return its path."""
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
-                             launch_monitor=launch_monitor, app_version=app_version, round_dp=round_dp)
+                             launch_monitor=launch_monitor, app_version=app_version,
+                             round_dp=round_dp, session_ids=session_ids)
     name = f"opengolflab_{manifest['contributor_uuid'][:8]}_{manifest['created_date']}.zip"
     path = os.path.abspath(os.path.join(out_root, name))
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -289,13 +310,15 @@ def build_zip(df: pd.DataFrame, out_root: str, *, app_dir: str,
 
 def send_bundle(df: pd.DataFrame, *, app_dir: str, url: str, key: str | None = None,
                 handicap_band: str = "unknown", launch_monitor: str = "",
-                app_version: str = "", round_dp: int = 1, timeout: int = 30) -> dict:
+                app_version: str = "", round_dp: int = 1, timeout: int = 30,
+                session_ids=None) -> dict:
     """POST an anonymized bundle to the intake Worker. Returns the parsed reply
     (with shot_count). Raises RuntimeError on a network/server problem."""
     if not url or not url.startswith("https://"):
         raise ValueError("Intake URL is not configured.")
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
-                             launch_monitor=launch_monitor, app_version=app_version, round_dp=round_dp)
+                             launch_monitor=launch_monitor, app_version=app_version,
+                             round_dp=round_dp, session_ids=session_ids)
     payload = json.dumps({"manifest": manifest, "shots_csv": out.to_csv(index=False)}).encode("utf-8")
     headers = {
         "Content-Type": "application/json",

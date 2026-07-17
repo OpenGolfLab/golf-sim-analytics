@@ -29,6 +29,7 @@ from config import (
     CLUB_FITTING_WINDOWS, REFERENCE_PROFILES, Colors, get_club_rank, get_fitting_window,
     normalize_club_name,
 )
+from data import units as units_mod
 from data.columns import (
     CARRY_ALIASES, DESCENT_ANGLE_ALIASES, HEIGHT_ALIASES, LAUNCH_ANGLE_ALIASES, find_col,
 )
@@ -107,8 +108,12 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     marker_of = {c: _APEX_MARKERS[i % len(_APEX_MARKERS)] for i, c in enumerate(order)}
     summary = df.groupby("club").agg({carry_col: "mean", height_col: "mean"}).reset_index()
 
+    # Only carry (the distance axis) switches unit; apex/height stays in feet —
+    # its fitting-window bands below are calibrated in feet, and the request is
+    # about distances, not height.
+    unit = extra.get("units", units_mod.YARDS)
     d = df[(df[carry_col] > 0) & df[height_col].notna()]
-    carry = d[carry_col].to_numpy(float)
+    carry = units_mod.to_display(d[carry_col].to_numpy(float), unit)
     apex = _apex_ft(d[height_col].to_numpy(float))
     clubs = d["club"].astype(str).to_numpy()
 
@@ -137,7 +142,7 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     t2 = np.linspace(0, 1, 120)
     handle_of = {}  # club -> legend handle, so the legend can emit in rank order
     for _, row in summary.iterrows():
-        c_val, a_val = row[carry_col], row[height_col]
+        c_val, a_val = units_mod.to_display(row[carry_col], unit), row[height_col]
         club = row["club"]
         if not (c_val > 0 and pd.notna(a_val)):
             continue
@@ -162,7 +167,7 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     ax_traj.set_xlim(0, max(max_x * 1.03, 10))
     ax_traj.set_ylim(0, max(max_y * 1.12, 10))
     ax_traj.set_ylabel("Height (Feet)", fontsize=font_scale)
-    ax_traj.set_xlabel("Carry (Yards)", fontsize=font_scale)
+    ax_traj.set_xlabel(f"Carry ({units_mod.dist_suffix(unit)})", fontsize=font_scale)
     style_axes(ax_traj, font_scale)
 
     # Club legend as a horizontal strip along the top of the arc axes, outside

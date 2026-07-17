@@ -22,6 +22,7 @@ import pandas as pd
 
 from config import Colors
 from data import on_course
+from data import units as units_mod
 from ui.charts._shared import style_axes
 from ui.empty_state import show_message
 
@@ -61,12 +62,13 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     # room and read as a matched pair; the per-round bars sit below.
     gs = fig.add_gridspec(2, 2, height_ratios=[1.35, 1.0], width_ratios=[1.05, 1.0],
                           hspace=0.5, wspace=0.3)
-    _kpi_panel(fig.add_subplot(gs[0, 0]), rounds, font_scale)
+    _kpi_panel(fig.add_subplot(gs[0, 0]), rounds, font_scale,
+               extra.get("units", units_mod.YARDS))
     _scoring_breakdown(fig.add_subplot(gs[0, 1]), rounds, font_scale)
     _round_scores(fig.add_subplot(gs[1, :]), rounds, font_scale)
 
 
-def _kpi_panel(ax, rounds, font_scale):
+def _kpi_panel(ax, rounds, font_scale, unit=units_mod.YARDS):
     ax.set_axis_off()
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
@@ -76,7 +78,8 @@ def _kpi_panel(ax, rounds, font_scale):
     birdies = int(rounds["Birdie"].sum())
     eagles = int(rounds["Eagle+"].sum())
     ld = rounds["longest_drive"].dropna()
-    longest = f"{ld.max():.0f} yds" if not ld.empty else "—"
+    longest = (f"{units_mod.to_display(ld.max(), unit):.0f} {units_mod.dist_suffix_lower(unit)}"
+               if not ld.empty else "—")
     # Best round by score per hole (fair across partial rounds), shown as its
     # raw to-par with hole count.
     per_hole = rounds["to_par"] / rounds["holes"].where(rounds["holes"] > 0)

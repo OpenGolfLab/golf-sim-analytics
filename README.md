@@ -22,6 +22,7 @@
 | Club Fitting | Club Comparison (adapter A/B testing with live capture) |
 | Speed Training | Cruising speed, fatigue curve, speed vs. strike quality, long-term progression |
 | On-Course | Automatic scorecards — holes, birdies, scoring breakdown, longest drives |
+| Community | Anonymized shots shared by the OpenGolfLab community, dispersion + per-club averages, filterable by club |
 | Live | Real-time dispersion for the round in progress |
 
 ![Dispersion with per-shot diagnostics](docs/screenshots/dispersion.jpg)
@@ -49,7 +50,9 @@ That's it. On first launch the app creates its data folders (`raw_csvs/`, `parqu
 
 1. **Automatic Desktop pickup** — hit *Export CSV* in GSPro's Practice Range; the app copies it off the Desktop (your file is never moved or deleted), ingests it, and refreshes. Non-GSPro CSVs on the Desktop are ignored.
 2. **Live tracking** — with GSPro running, shots are tracked continuously from GSPro's round file, enriched with club data from GSPro's own database, and archived automatically when the round ends. If a CSV export of the same round shows up later, it's reconciled into the live-tracked session instead of duplicating it.
-3. **Manual drop** — any GSPro CSV placed in `raw_csvs/` is ingested within seconds.
+3. **Manual import** — click **Import CSV** in the top bar (multi-select), or drag-and-drop CSV files straight onto the window. Any GSPro CSV placed in `raw_csvs/` by hand is also ingested within seconds.
+
+Units are yards by default; switch to meters under **⚙ Settings → Distance units** (display-only — your stored data stays in yards). Sharing to OpenGolfLab is opt-in and per-round: the **Contribute Data** panel lets you pick exactly which sessions to send.
 
 ## Building for distribution
 

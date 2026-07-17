@@ -17,6 +17,7 @@ from matplotlib.colors import LinearSegmentedColormap, to_rgba
 from matplotlib.lines import Line2D
 
 from config import Colors, get_club_color, get_club_rank
+from data import units as units_mod
 from data.columns import CARRY_ALIASES, OFFLINE_ALIASES, find_col
 from ui.charts import motivation_bars
 from ui.charts._shared import (
@@ -59,6 +60,9 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     # that sets the scatter off from the gauges, so the two gauges themselves
     # sit close together as a pair. (A nested subgridspec was tried for this
     # but collapses to zero-width axes in very small/compact panels.)
+    unit = extra.get("units", units_mod.YARDS)
+    df = units_mod.to_display_frame(df, unit)
+    u = units_mod.dist_suffix_lower(unit)
     gs = fig.add_gridspec(1, 4, width_ratios=[6.5, 0.5, 1.2, 1.2], wspace=0.15)
     ax = fig.add_subplot(gs[0, 0])
     ax_speed = fig.add_subplot(gs[0, 2])
@@ -75,9 +79,12 @@ def render(fig, df, club_colors, font_scale, config, **extra):
             color=Colors.TEXT_MUTED, edgecolor="none", zorder=1,
         )
 
+    # The live buffer is raw dicts in yards; convert to the display unit so
+    # live points, per-club KDEs and tooltips match the historical background.
+    _c = lambda v: units_mod.to_display(v, unit)
     live_shots = config.get("live_shots") or []
     live_points = [
-        (s["offline"], s["carry"]) for s in live_shots
+        (_c(s["offline"]), _c(s["carry"])) for s in live_shots
         if s.get("offline") is not None and s.get("carry") is not None
     ]
 
@@ -85,7 +92,8 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     # style and per-club colors (config.CLUB_COLORS, same fixed palette the
     # historical Dispersion chart uses) as the historical Dispersion chart,
     # so a club's color is identical whether it's shown live or after export.
-    live_df = pd.DataFrame(live_shots) if live_shots else pd.DataFrame()
+    live_df = units_mod.to_display_frame(
+        pd.DataFrame(live_shots) if live_shots else pd.DataFrame(), unit)
     live_clubs = []
     if not live_df.empty and "club" in live_df.columns:
         live_clubs = sorted(live_df["club"].dropna().unique(), key=get_club_rank)
@@ -124,15 +132,16 @@ def render(fig, df, club_colors, font_scale, config, **extra):
         )
 
         # `plotted` is the exact list (and order) behind the scatter points.
-        live_rows = pd.DataFrame(plotted).reset_index(drop=True)
+        live_rows = units_mod.to_display_frame(
+            pd.DataFrame(plotted).reset_index(drop=True), unit)
         live_diag_cols = diagnostic_cols(live_rows)
 
         def _tooltip(row):
             lines = [str(row.get("club", "?"))]
             if pd.notna(row.get("carry")):
-                lines.append(f"Carry: {row['carry']:.0f} yds")
+                lines.append(f"Carry: {row['carry']:.0f} {u}")
             if pd.notna(row.get("offline")):
-                lines.append(f"Offline: {row['offline']:+.1f} yds")
+                lines.append(f"Offline: {row['offline']:+.1f} {u}")
             if "ballspeed" in row.index and pd.notna(row.get("ballspeed")):
                 lines.append(f"Ball speed: {row['ballspeed']:.0f} mph")
             # Launch/descent/spin/smash — what went right or wrong, flagged
@@ -205,14 +214,14 @@ def render(fig, df, club_colors, font_scale, config, **extra):
         last = live_shots[-1]
         bits = [f"Latest: {last.get('club', '?')}"]
         if last.get("carry") is not None:
-            bits.append(f"{last['carry']:.0f} yds")
+            bits.append(f"{_c(last['carry']):.0f} {u}")
         if last.get("clubspeed") is not None:
             bits.append(f"{last['clubspeed']:.0f} mph")
         ax.set_title("  ·  ".join(bits), fontsize=max(11, font_scale - 1),
                      color=Colors.TEXT_MUTED, loc="left", pad=8)
 
-    ax.set_xlabel("Offline (Yards)", fontsize=font_scale)
-    ax.set_ylabel("Carry (Yards)", fontsize=font_scale)
+    ax.set_xlabel(f"Offline ({units_mod.dist_suffix(unit)})", fontsize=font_scale)
+    ax.set_ylabel(f"Carry ({units_mod.dist_suffix(unit)})", fontsize=font_scale)
     style_axes(ax, font_scale)
 
     _draw_motivation_bars(ax_speed, ax_quality, live_shots, config, font_scale)

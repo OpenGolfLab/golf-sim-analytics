@@ -35,6 +35,14 @@ DEFAULTS: dict = {
     # 10" laptop to a wall TV — see auto_scale_for() below. Any explicit
     # percentage string ("100%", "125%", ...) overrides Auto.
     "ui_scale": "Auto",
+    # Display unit for distances (carry/total/offline/apex). Display-only — the
+    # stored data and contributions stay in yards; see data/units.py.
+    "units": "Yards",
+    # Override for GSPro's per-user data folder (where currentRound.dat /
+    # GSPro.db / Player.log live) used by live tracking. Blank = the standard
+    # auto-detected location (config.GSPRO_DEFAULT_DATA_DIR); only non-standard
+    # GSPro setups need to set this.
+    "gspro_data_dir": "",
     # Keep on-course rounds (which include chips, punches, recovery shots)
     # out of the practice-analytics dashboards so they don't taint the
     # "pure your swing" historical data. On by default: the whole point of

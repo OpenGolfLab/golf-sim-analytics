@@ -6,6 +6,7 @@ each session, so it's unaffected by the global Time filter.
 """
 from __future__ import annotations
 
+from data import units as units_mod
 from ui.charts._compare import PALETTE, render_comparison
 from ui.empty_state import show_message
 
@@ -41,4 +42,5 @@ def render(fig, df, club_colors, font_scale, config, **extra):
 
     render_comparison(fig, groups, font_scale,
                       empty_msg=f"No {club} shots in the selected sessions",
-                      subtitle=f"Club: {club}")
+                      subtitle=f"Club: {club}",
+                      unit=extra.get("units", units_mod.YARDS))

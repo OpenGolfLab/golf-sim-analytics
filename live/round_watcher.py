@@ -210,9 +210,13 @@ class LiveRoundWatcher:
         except OSError:
             log.exception("Failed to persist live round watcher archive state")
 
-    def _finalize_buffer(self) -> None:
+    def _finalize_buffer(self) -> dict | None:
+        """Archive the current buffer if there's anything new to archive.
+        Returns the archive-summary dict (same shape as archive_round's) when
+        a round was actually written, or None when there was nothing to do
+        (empty buffer, or this exact file state was already archived)."""
         if not self._buffer or self._already_archived_current:
-            return
+            return None
         lm_info = detect_lm(self.lm_log_dir) if self.lm_log_dir else {}
         info = archive_round(self._buffer, self.data_dir, self.raw_archive_dir,
                              club_lookup=self.club_lookup, lm_info=lm_info)
@@ -228,11 +232,22 @@ class LiveRoundWatcher:
                 self.schedule_on_main_thread(lambda i=info: self.on_round_archived(i))
             else:
                 self.on_round_archived(info)
+        return info
 
-    def finalize_now(self) -> None:
-        """Best-effort flush of whatever's currently buffered — call this
-        on app shutdown so an in-progress round isn't lost if GSPro is
-        still running when this app closes.
+    def finalize_now(self) -> dict | None:
+        """Best-effort flush of whatever's currently buffered — call this on
+        app shutdown, or from an explicit "End Round" action, so a finished
+        round is archived (and shows up in the historical dashboards +
+        contribution) without waiting for GSPro to start the next round or the
+        app to close.
+
+        Returns the archive-summary dict when a round was written, or None
+        when there was nothing new to archive. Safe to call repeatedly: the
+        ``_already_archived_current`` guard means a second call (e.g. an
+        explicit End Round followed by app shutdown) never double-archives the
+        same round, and a genuinely new GSPro round still archives normally
+        because the round-boundary path resets that guard.
         """
-        self._finalize_buffer()
+        info = self._finalize_buffer()
         self._buffer = []
+        return info
