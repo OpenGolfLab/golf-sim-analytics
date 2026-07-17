@@ -57,4 +57,6 @@ data (`raw_csvs/`, `parquet_data/`) — these are gitignored for a reason.
 ## License
 
 By contributing, you agree that your contributions are licensed under the
-project's [MIT License](LICENSE).
+project's [GNU AGPL-3.0](LICENSE) license, the same terms as the project
+itself. Commercial *use* of the app is welcome; the license only requires that
+distributed or hosted modifications share their source.

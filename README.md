@@ -108,4 +108,4 @@ Bug reports and PRs are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for s
 
 ## License
 
-[MIT](LICENSE) © OpenGolfLab. The OpenGolfLab community data pipeline (intake and read APIs) lives in separate repositories.
+[AGPL-3.0](LICENSE) © OpenGolfLab. In plain terms: use it anywhere (home, sim lounge, coaching studio — commercial use is fine), modify it freely, but if you distribute a modified version or host it as a service, you must share your source under the same license. The OpenGolfLab community data pipeline (intake and read APIs) lives in separate repositories.
