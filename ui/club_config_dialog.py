@@ -105,8 +105,8 @@ def open_club_config_dialog(root, sessions, clubs, current, on_apply):
         on_apply(label_to_sid.get(session_var.get()), configs)
         win.destroy()
 
-    theme.outline_button(btns, accent=Colors.SUCCESS, text="Apply", command=_apply, width=100).pack(side="right", padx=(6, 0))
-    theme.outline_button(btns, accent=Colors.TEXT_MUTED, text="Cancel", command=win.destroy, width=100).pack(side="right")
+    theme.primary_button(btns, text="Apply", command=_apply, width=100).pack(side="right", padx=(6, 0))
+    theme.ghost_button(btns, text="Cancel", command=win.destroy, width=100).pack(side="right")
 
     win.after(120, lambda: (win.winfo_exists() and (win.lift(), win.focus_force())))
     return win

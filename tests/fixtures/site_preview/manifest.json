@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.3",
+  "app": {
+    "name": "GolfSimAnalytics",
+    "version": "fixture"
+  },
+  "contributor_uuid": "00000000-0000-4000-8000-000000000000",
+  "display_name": "SteadyFade-3fa2",
+  "created_date": "2026-07-17",
+  "consent": {
+    "policy_version": "1.0",
+    "accepted": true
+  },
+  "environment": {
+    "platform": "GSPro",
+    "instrument": {
+      "model": "Trackman",
+      "kind": "radar",
+      "measures_spin": true,
+      "verification": {
+        "status": "unverified",
+        "observed_connect_types": []
+      }
+    }
+  },
+  "self_report": {
+    "handicap_band": "5-9"
+  },
+  "shot_count": 28
+}

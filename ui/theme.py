@@ -9,9 +9,24 @@ customtkinter, so every screen shares the same design language.
 """
 from __future__ import annotations
 
+import tkinter as tk
+
 import customtkinter as ctk
 
 from config import Colors, FONT_FAMILY, FONT_SCALE, SPACING
+
+# ---------------------------------------------------------------------------
+# Control metrics — the one set of numbers every interactive control is built
+# from, so heights, corner radii and gaps line up by construction instead of
+# by each call site guessing. Anything that reads as a "control" (button,
+# dropdown chip, entry) uses CONTROL_HEIGHT/CONTROL_RADIUS; containers that
+# read as a "surface" (cards, popups, panels) use SURFACE_RADIUS.
+# ---------------------------------------------------------------------------
+CONTROL_HEIGHT = 30
+CONTROL_HEIGHT_SM = 24     # compact controls inside popups (All / None / Done)
+CONTROL_RADIUS = 6
+SURFACE_RADIUS = 10        # cards, dropdown panels, dialogs, toasts, tooltips
+ICON_BUTTON_WIDTH = 36
 
 
 def apply_global_theme() -> None:
@@ -37,7 +52,7 @@ def card_frame(master, **kwargs) -> ctk.CTkFrame:
         fg_color=Colors.BG_SURFACE,
         border_width=1,
         border_color=Colors.BORDER,
-        corner_radius=10,
+        corner_radius=SURFACE_RADIUS,
     )
     defaults.update(kwargs)
     return ctk.CTkFrame(master, **defaults)
@@ -67,27 +82,89 @@ def body_label(master, text: str, color: str = Colors.TEXT_PRIMARY, **kwargs) ->
     return ctk.CTkLabel(master, **defaults)
 
 
-def primary_button(master, **kwargs) -> ctk.CTkButton:
+# ---------------------------------------------------------------------------
+# Button language.
+#
+# There are exactly three kinds of button, and the choice is driven by what the
+# button *means*, never by wanting some color on screen:
+#
+#   ghost_button   — the default. Every ordinary action.
+#   primary_button — the single most important action on a surface. At most one
+#                    per surface (one per dialog; at most one in the top bar).
+#   danger_button  — destructive and irreversible (delete a shot, delete a
+#                    session). Red here is semantic, not decorative.
+#
+# This replaces the old `outline_button(accent=...)`, where each call site
+# picked its own 2px accent border — so the top bar was a row of bronze / blue /
+# green / gold pills that implied six unrelated categories where there was really
+# just "things you can click". Color in this app now belongs to *state* (Go Live
+# while live) and to *data* (CLUB_COLORS, semantic chart zones) only.
+# ---------------------------------------------------------------------------
+def ghost_button(master, **kwargs) -> ctk.CTkButton:
+    """Quiet, flat action button — transparent until hovered."""
     defaults = dict(
-        fg_color=Colors.ACCENT,
-        hover_color=Colors.ACCENT_HOVER,
-        text_color=Colors.TEXT_ACTIVE,
-        font=font("label", "bold"),
-        corner_radius=8,
+        fg_color="transparent",
+        hover_color=Colors.BG_HOVER,
+        border_width=0,
+        text_color=Colors.TEXT_PRIMARY,
+        font=font("label"),
+        corner_radius=CONTROL_RADIUS,
+        height=CONTROL_HEIGHT,
     )
     defaults.update(kwargs)
     return ctk.CTkButton(master, **defaults)
 
 
-def outline_button(master, accent: str = Colors.SUCCESS, **kwargs) -> ctk.CTkButton:
+def primary_button(master, **kwargs) -> ctk.CTkButton:
+    defaults = dict(
+        fg_color=Colors.ACCENT,
+        hover_color=Colors.ACCENT_HOVER,
+        text_color=Colors.TEXT_ON_LIGHT,
+        font=font("label", "bold"),
+        corner_radius=CONTROL_RADIUS,
+        height=CONTROL_HEIGHT,
+    )
+    defaults.update(kwargs)
+    return ctk.CTkButton(master, **defaults)
+
+
+def danger_button(master, **kwargs) -> ctk.CTkButton:
+    """Destructive action. Quiet like a ghost button until hovered, at which
+    point it commits to red — the weight matches the consequence without the
+    button shouting at you the whole time it's on screen."""
+    defaults = dict(
+        fg_color="transparent",
+        hover_color=Colors.DANGER,
+        border_width=1,
+        border_color=Colors.DANGER,
+        text_color=Colors.DANGER,
+        font=font("label"),
+        corner_radius=CONTROL_RADIUS,
+        height=CONTROL_HEIGHT,
+    )
+    defaults.update(kwargs)
+    btn = ctk.CTkButton(master, **defaults)
+    # Red-on-red is unreadable once the hover fill lands, so lift the label to
+    # near-white for the duration of the hover.
+    btn.bind("<Enter>", lambda _e: btn.configure(text_color=Colors.TEXT_ACTIVE), add="+")
+    btn.bind("<Leave>", lambda _e: btn.configure(text_color=Colors.DANGER), add="+")
+    return btn
+
+
+def chip_button(master, **kwargs) -> ctk.CTkButton:
+    """A filter control: a hairline-bordered neutral chip. Distinct from
+    ghost_button (which has no border) so the eye can separate "things that
+    narrow what you're looking at" from "things that do something", while both
+    stay in the same quiet neutral family."""
     defaults = dict(
         fg_color="transparent",
         hover_color=Colors.BG_HOVER,
-        border_width=2,
-        border_color=accent,
-        text_color=accent,
-        font=font("label", "bold"),
-        corner_radius=8,
+        border_width=1,
+        border_color=Colors.BORDER,
+        text_color=Colors.TEXT_PRIMARY,
+        font=font("body"),
+        corner_radius=CONTROL_RADIUS,
+        height=CONTROL_HEIGHT,
     )
     defaults.update(kwargs)
     return ctk.CTkButton(master, **defaults)
@@ -99,7 +176,7 @@ def solid_button(master, color: str, hover: str, **kwargs) -> ctk.CTkButton:
         hover_color=hover,
         text_color=Colors.TEXT_ACTIVE,
         font=font("label", "bold"),
-        corner_radius=8,
+        corner_radius=CONTROL_RADIUS,
     )
     defaults.update(kwargs)
     return ctk.CTkButton(master, **defaults)
@@ -148,10 +225,32 @@ def dropdown(master, values, variable, command=None, **kwargs) -> ctk.CTkComboBo
     return ctk.CTkComboBox(master, **defaults)
 
 
-def divider(master, **kwargs) -> ctk.CTkFrame:
-    defaults = dict(height=1, fg_color=Colors.BORDER)
+# ---------------------------------------------------------------------------
+# Rules / dividers.
+#
+# These are plain tk.Frames, and they are the one deliberate exception to this
+# module's "everything is customtkinter" rule. A CTkFrame paints nothing at all
+# below 2px on either axis — its canvas draw engine rounds the rounded-rect
+# geometry away — so `CTkFrame(height=1)`, which is what divider() used to be,
+# was invisible everywhere it was used: every section-card rule, every Settings
+# and Contribute separator. A plain tk.Frame paints a true 1px hairline.
+#
+# There's no theming cost: a 1px rule has no font, hover, or corner radius to be
+# inconsistent about — only a color, which still comes from Colors.BORDER.
+# ---------------------------------------------------------------------------
+def divider(master, **kwargs) -> tk.Frame:
+    """A horizontal hairline rule. Pack/grid it with fill="x"."""
+    defaults = dict(height=1, bg=Colors.BORDER, bd=0, highlightthickness=0)
     defaults.update(kwargs)
-    return ctk.CTkFrame(master, **defaults)
+    return tk.Frame(master, **defaults)
+
+
+def vdivider(master, **kwargs) -> tk.Frame:
+    """A vertical hairline rule, for separating groups within a row. Pack it
+    with fill="y"."""
+    defaults = dict(width=1, bg=Colors.BORDER, bd=0, highlightthickness=0)
+    defaults.update(kwargs)
+    return tk.Frame(master, **defaults)
 
 
 def readable_text_on(hex_color: str) -> str:

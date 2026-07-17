@@ -1,0 +1,60 @@
+{
+  "clubs": {
+    "5I": {
+      "ball_speed_median": 102.0,
+      "carry_median": 181.0,
+      "carry_spread_mad": 2.6,
+      "launch_median": 15.4,
+      "offline_bias_median": 0.8,
+      "offline_spread_mad": 4.8,
+      "shots_used": 5,
+      "spin_median": 5480,
+      "spin_published_only_if": "instrument measures spin (Verified tier)"
+    },
+    "7I": {
+      "ball_speed_median": 118.0,
+      "carry_median": 157.8,
+      "carry_spread_mad": 2.7,
+      "launch_median": 17.9,
+      "offline_bias_median": -1.6,
+      "offline_spread_mad": 3.8,
+      "shots_used": 7,
+      "spin_median": 6870,
+      "spin_published_only_if": "instrument measures spin (Verified tier)"
+    },
+    "Dr": {
+      "ball_speed_median": 166.9,
+      "carry_median": 267.1,
+      "carry_spread_mad": 3.8,
+      "launch_median": 11.3,
+      "offline_bias_median": -1.7,
+      "offline_spread_mad": 5.8,
+      "shots_used": 6,
+      "spin_median": 2510,
+      "spin_published_only_if": "instrument measures spin (Verified tier)"
+    }
+  },
+  "clubs_below_shot_floor": [
+    "4I",
+    "9I",
+    "PW"
+  ],
+  "generated_from": {
+    "created_date": "2026-07-17",
+    "display_name": "SteadyFade-3fa2",
+    "instrument_measures_spin": true,
+    "instrument_model": "Trackman",
+    "manifest_schema_version": "1.3"
+  },
+  "preview_schema_version": "1.0",
+  "rules": {
+    "min_club_shots": 5,
+    "min_contributors_to_publish": 8,
+    "note": "Per-club numbers above are computed from your shots with the same rules opengolflab.org uses (AGGREGATION.md \u00a72-\u00a73). The site publishes the median ACROSS contributors, so a club only appears once at least 8 people have contributed 5+ shots of it. Your numbers are one vote in each of those medians."
+  },
+  "shots": {
+    "dropped_by_quality_checks": 3,
+    "passed_quality_checks": 25,
+    "submitted": 28
+  }
+}

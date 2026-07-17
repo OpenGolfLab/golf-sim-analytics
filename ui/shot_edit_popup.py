@@ -43,9 +43,9 @@ def open_shot_edit_popup(root, current_club, clubs, on_pick_club, on_delete):
         on_delete()
         win.destroy()
 
-    theme.outline_button(btns, accent=Colors.DANGER, text="Delete shot",
+    theme.danger_button(btns, text="Delete shot",
                          command=_delete, width=110).pack(side="left")
-    theme.outline_button(btns, accent=Colors.TEXT_MUTED, text="Cancel",
+    theme.ghost_button(btns, text="Cancel",
                          command=win.destroy, width=90).pack(side="right")
     win.after(120, lambda: (win.winfo_exists() and (win.lift(), win.focus_force())))
     return win

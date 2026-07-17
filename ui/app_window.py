@@ -44,6 +44,7 @@ import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 import config
+import contribute
 from config import Colors, get_club_rank
 from data import filters as filters_mod
 from data import adapter_tags, edits as edits_mod, on_course, settings as settings_mod
@@ -75,7 +76,7 @@ from ui.charts.live_dispersion import NAME as LIVE_NAME
 from ui.charts.on_course_dashboard import NAME as ONCOURSE_NAME
 from ui.charts.registry import DASHBOARDS
 from ui.charts.trajectory import NAME as TRAJECTORY_NAME
-from ui.components import DropdownPanel, MultiSelectDropdown, SingleSelectDropdown
+from ui.components import DropdownPanel, MultiSelectDropdown, SingleSelectDropdown, menu_item
 from ui.dialogs import show_toast
 from ui.empty_state import show_message
 from ui.home_page import build_home_page, course_banner
@@ -84,6 +85,20 @@ log = logging.getLogger(__name__)
 
 MAX_ACTIVE_PLOTS = 2
 MAX_GRID_ROWS = 10  # generous upper bound used to fully reset row weights each rebuild
+
+# Top-bar geometry. Named because these numbers have to agree with each other
+# (and with the sidebar/grid edges) — scattering the literals is how the bar
+# drifted out of alignment in the first place.
+#
+# The bar has no fixed height on purpose: its controls are sized in CTk units
+# and get multiplied by the display scale (data.settings.resolve_scale), so any
+# height hard-coded here would be right on exactly one display. BAR_PAD_Y is
+# the real control — the bar ends up one control tall plus this, top and bottom.
+BAR_PAD_X = config.SPACING["lg"]     # bar's outer left/right inset
+BAR_PAD_Y = config.SPACING["sm"]     # vertical inset for controls in the bar
+BAR_GAP = config.SPACING["xs"]       # between adjacent controls in a group
+BAR_GAP_GROUP = config.SPACING["lg"]  # between groups (e.g. one filter and the next)
+BAR_SEP_PAD_Y = config.SPACING["md"]  # hairline separator inset, top and bottom
 
 # "Solo" dashboards are dense, multi-panel composites that only read well
 # filling the whole screen, so they take over the grid alone (like Live) —
@@ -123,6 +138,10 @@ class SimAnalyticsApp:
         self.settings_ui_scale = tk.StringVar(value=self._settings.get("ui_scale", "Auto"))
         # Distance display unit (yards/meters) — display-only, persisted.
         self.settings_units = tk.StringVar(value=self._settings.get("units", units_mod.YARDS))
+        # Public name shown beside contributed data on opengolflab.org. Blank =
+        # fall back to a name generated from the contributor id (see
+        # contribute.resolve_display_name); never blank on the wire.
+        self.settings_display_name = tk.StringVar(value=self._settings.get("display_name", ""))
         # Optional override for GSPro's data folder (live tracking source);
         # blank means use the standard auto-detected location.
         self.settings_gspro_dir = tk.StringVar(value=self._settings.get("gspro_data_dir", ""))
@@ -464,17 +483,26 @@ class SimAnalyticsApp:
         self._update_go_live_button()
 
     def _update_go_live_button(self):
+        """Go Live is the one element in the top bar allowed to carry color, and
+        only while live: a filled accent pill is *state* ("you are recording"),
+        which is worth a person's attention. Idle, it's an ordinary ghost button
+        like everything else in the bar."""
         is_on = self.plot_state[LIVE_NAME]["var"].get()
         if is_on:
-            self.go_live_button.configure(text="Live: ON", fg_color=Colors.ACCENT, text_color=Colors.TEXT_ON_LIGHT)
+            self.go_live_button.configure(
+                text="Live: ON", fg_color=Colors.ACCENT, hover_color=Colors.ACCENT_HOVER,
+                text_color=Colors.TEXT_ON_LIGHT, font=theme.font("label", "bold"))
         else:
-            self.go_live_button.configure(text="Go Live", fg_color="transparent", text_color=Colors.ACCENT)
+            self.go_live_button.configure(
+                text="Go Live", fg_color="transparent", hover_color=Colors.BG_HOVER,
+                text_color=Colors.TEXT_PRIMARY, font=theme.font("label"))
         # "End Round" is only meaningful while watching a live round — hide it
         # otherwise so it doesn't invite finalizing when nothing's in progress.
         btn = getattr(self, "end_round_button", None)
         if btn is not None:
             if is_on:
-                btn.pack(side=tk.LEFT, padx=(0, 6), pady=12, after=self.go_live_button)
+                btn.pack(side=tk.LEFT, padx=(0, BAR_GAP), pady=BAR_PAD_Y,
+                         after=self.go_live_button)
             else:
                 btn.pack_forget()
 
@@ -618,17 +646,49 @@ class SimAnalyticsApp:
     def _on_community_loaded(self, df):
         self._community_loading = False
         self._community_df = df if df is not None else pd.DataFrame()
+        self._community_as_of = (df.attrs.get("as_of")
+                                 if df is not None and hasattr(df, "attrs") else None)
         self._community_status = "ok" if not self._community_df.empty else "empty"
         # Repaint if the Community panel is the one on screen.
         if self.plot_state[COMMUNITY_NAME]["var"].get():
             self.update_single_plot(COMMUNITY_NAME, self._active_count())
 
+    # ------------------------------------------------------------------
+    # Data menu — the single home for actions that operate on your data.
+    # Import used to sit in the top bar as its own button and Manage Sessions
+    # was buried in Settings; neither is configuration, so both live here.
+    # ------------------------------------------------------------------
+    def _open_data_menu(self):
+        panel = getattr(self, "_data_panel", None)
+        if panel is None:
+            panel = DropdownPanel(self.data_button, self._build_data_menu, width=250)
+            self._data_panel = panel
+        panel.toggle()
+
+    def _build_data_menu(self, card, close):
+        def _act(fn):
+            # Close first: these open a modal file picker or another panel, and
+            # leaving this menu hanging behind them looks broken.
+            close()
+            self.root.after(10, fn)
+
+        menu_item(card, "Import CSV…", lambda: _act(self._open_import_dialog))
+        menu_item(card, "Contribute Data…", lambda: _act(self._open_contribute))
+        menu_item(card, "Manage Sessions…", lambda: _act(self._open_manage_sessions))
+
+        theme.divider(card).pack(fill="x", pady=(config.SPACING["sm"], config.SPACING["xs"]))
+        theme.body_label(
+            card, "Tip: you can drag CSV files straight onto the window.",
+            color=Colors.TEXT_MUTED, font=theme.font("caption"),
+            wraplength=230, justify="left", anchor="w",
+        ).pack(fill="x", padx=config.SPACING["sm"], pady=(0, config.SPACING["xs"]))
+
     def _open_contribute(self):
-        """Drop the OpenGolfLab contribution panel down under its top-bar button."""
+        """Drop the OpenGolfLab contribution panel down under the Data menu."""
         from ui.contribute_dialog import build_contribute_body
         panel = getattr(self, "_contribute_panel", None)
         if panel is None:
-            panel = DropdownPanel(self.contribute_button, build_contribute_body, width=430)
+            panel = DropdownPanel(self.data_button, build_contribute_body, width=430)
             self._contribute_panel = panel
         panel.toggle()
 
@@ -696,68 +756,94 @@ class SimAnalyticsApp:
     # UI construction
     # ------------------------------------------------------------------
     def _build_ui(self):
-        top_bar = theme.sidebar_frame(self.root, height=64)
+        """The top bar reads left-to-right as: what you can *do* (Go Live, Data,
+        Settings), then — separated by a hairline — what you're *looking at*
+        (the filters). Actions are quiet ghost buttons in one neutral language;
+        the only element allowed to carry color is Go Live, and only while live,
+        because that's state rather than decoration.
+        """
+        top_bar = theme.sidebar_frame(self.root)
         top_bar.pack(side=tk.TOP, fill=tk.X)
 
         # Collapse/expand the left dashboard menu to hand its width to the
         # charts. The glyph is a hamburger (menu) affordance — functional, not
         # decorative.
         self._sidebar_visible = True
-        self.sidebar_toggle_btn = theme.outline_button(
-            top_bar, accent=Colors.TEXT_MUTED, text="☰", command=self._toggle_sidebar,
-            width=44,
+        self.sidebar_toggle_btn = theme.ghost_button(
+            top_bar, text="☰", command=self._toggle_sidebar,
+            width=theme.ICON_BUTTON_WIDTH,
         )
-        self.sidebar_toggle_btn.pack(side=tk.LEFT, padx=(15, 6), pady=12)
+        self.sidebar_toggle_btn.pack(side=tk.LEFT, padx=(BAR_PAD_X, BAR_GAP_GROUP), pady=BAR_PAD_Y)
         attach_tooltip(self.sidebar_toggle_btn, "Hide or show the dashboard menu")
 
-        self.go_live_button = theme.outline_button(
-            top_bar, accent=Colors.ACCENT, text="Go Live", command=self.toggle_live,
+        self.go_live_button = theme.ghost_button(
+            top_bar, text="Go Live", command=self.toggle_live, width=96,
         )
-        self.go_live_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
+        self.go_live_button.pack(side=tk.LEFT, padx=(0, BAR_GAP), pady=BAR_PAD_Y)
 
         # Explicit "End Round": archive the in-progress live round now so it
         # shows up in the historical dashboards + contribution picker without a
         # restart. Only visible while live mode is on (see _update_go_live_button).
-        self.end_round_button = theme.outline_button(
-            top_bar, accent=Colors.WARNING, text="End Round",
+        self.end_round_button = theme.ghost_button(
+            top_bar, text="End Round", width=96,
             command=lambda: self._finalize_live_round(show_feedback=True),
         )
         attach_tooltip(self.end_round_button,
                        "Finish and save the round you're tracking so it appears in your history now")
 
-        self.import_button = theme.outline_button(
-            top_bar, accent=Colors.INFO, text="Import CSV",
-            command=self._open_import_dialog,
+        # Data actions live behind one menu. Import/Contribute/Manage are things
+        # you *do* to your data; Settings is configuration. Keeping import out of
+        # Settings is the point — it never belonged there.
+        self.data_button = theme.ghost_button(
+            top_bar, text="Data ▾", command=self._open_data_menu, width=76,
         )
-        self.import_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
-        attach_tooltip(self.import_button,
-                       "Import launch-monitor CSV files — or drag and drop them onto the window")
+        self.data_button.pack(side=tk.LEFT, padx=(0, BAR_GAP), pady=BAR_PAD_Y)
+        attach_tooltip(self.data_button,
+                       "Import CSVs, contribute to OpenGolfLab, or manage your sessions")
 
-        self.contribute_button = theme.outline_button(
-            top_bar, accent=Colors.SUCCESS, text="Contribute Data",
-            command=self._open_contribute,
+        self.settings_button = theme.ghost_button(
+            top_bar, text="Settings ▾", command=self._open_settings, width=92,
         )
-        self.contribute_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
+        self.settings_button.pack(side=tk.LEFT, padx=(0, BAR_GAP), pady=BAR_PAD_Y)
 
-        self.settings_button = theme.outline_button(
-            top_bar, accent=Colors.ACCENT, text="Settings", command=self._open_settings,
-        )
-        self.settings_button.pack(side=tk.LEFT, padx=(0, 6), pady=12)
-
+        # ---- filters (right side) ----
         filter_frame = ctk.CTkFrame(top_bar, fg_color="transparent")
-        filter_frame.pack(side=tk.RIGHT, padx=15, pady=10)
+        filter_frame.pack(side=tk.RIGHT, padx=(0, BAR_PAD_X), pady=BAR_PAD_Y)
 
-        theme.section_label(filter_frame, "Shot Quality", color=Colors.WARNING).grid(row=0, column=4, padx=(15, 5))
+        # Hairline between the action side and the filter side: the two groups
+        # do different kinds of work and shouldn't read as one long row.
+        theme.vdivider(top_bar).pack(side=tk.RIGHT, fill=tk.Y,
+                                     padx=(0, BAR_PAD_X), pady=BAR_SEP_PAD_Y)
+
+        def _filter_label(text, column, pad=(0, 5)):
+            lbl = theme.body_label(filter_frame, text, color=Colors.TEXT_MUTED,
+                                   font=theme.font("caption"))
+            lbl.grid(row=0, column=column, padx=pad)
+            return lbl
+
+        _filter_label("Time", 0)
+        SingleSelectDropdown(
+            filter_frame, filters_mod.TIME_FILTER_OPTIONS, self.global_time_var,
+            on_change=self._on_filter_changed, width=150,
+        ).grid(row=0, column=1)
+
+        _filter_label("Club", 2, pad=(BAR_GAP_GROUP, 5))
+        self.global_club_selector = MultiSelectDropdown(
+            filter_frame, self.global_club_vars, on_change=self._on_filter_changed,
+            width=140, item_label="Clubs", item_colors=config.CLUB_COLORS,
+        )
+        self.global_club_selector.grid(row=0, column=3)
+
+        _filter_label("Quality", 4, pad=(BAR_GAP_GROUP, 5))
         SingleSelectDropdown(
             filter_frame, filters_mod.QUALITY_FILTER_OPTIONS, self.global_quality_var,
-            on_change=self._on_filter_changed, accent=Colors.WARNING, width=190,
+            on_change=self._on_filter_changed, width=190,
         ).grid(row=0, column=5)
 
         # "Today's Temp": type the temperature to normalize distances to
         # standard conditions. Shown only when enabled in Settings; the value
         # in the box is the switch (blank = no normalization).
-        self.temp_norm_label = theme.section_label(filter_frame, "Today's Temp", color=Colors.INFO)
-        self.temp_norm_label.grid(row=0, column=6, padx=(15, 5))
+        self.temp_norm_label = _filter_label("Today's Temp", 6, pad=(BAR_GAP_GROUP, 5))
         attach_tooltip(self.temp_norm_label,
                        "Enter today's temperature — this normalizes your carry/total "
                        "distances to standard conditions so sessions hit on different "
@@ -767,28 +853,20 @@ class SimAnalyticsApp:
         # No placeholder_text: CTkEntry ignores it once a textvariable is bound,
         # so it never showed. A blank field means "off" (conveyed by the label's
         # tooltip); the muted "°F" suffix labels the unit.
-        temp_entry = ctk.CTkEntry(self.temp_norm_frame, textvariable=self.global_temp_var,
-                                  width=54, justify="center")
+        temp_entry = ctk.CTkEntry(
+            self.temp_norm_frame, textvariable=self.global_temp_var,
+            width=54, height=theme.CONTROL_HEIGHT, justify="center",
+            corner_radius=theme.CONTROL_RADIUS, font=theme.font("body"),
+            fg_color="transparent", border_color=Colors.BORDER, border_width=1,
+        )
         temp_entry.pack(side=tk.LEFT)
-        theme.body_label(self.temp_norm_frame, "°F", color=Colors.TEXT_MUTED).pack(side=tk.LEFT, padx=(4, 0))
+        theme.body_label(self.temp_norm_frame, "°F", color=Colors.TEXT_MUTED,
+                         font=theme.font("caption")).pack(side=tk.LEFT, padx=(4, 0))
         temp_entry.bind("<Return>", self._on_filter_changed)
         temp_entry.bind("<FocusOut>", self._on_filter_changed)
         if not self.settings_temp_norm_enabled.get():
             self.temp_norm_label.grid_remove()
             self.temp_norm_frame.grid_remove()
-
-        theme.section_label(filter_frame, "Club Filter", color=Colors.INFO).grid(row=0, column=2, padx=(15, 5))
-        self.global_club_selector = MultiSelectDropdown(
-            filter_frame, self.global_club_vars, on_change=self._on_filter_changed,
-            accent=Colors.INFO, width=140, item_label="Clubs", item_colors=config.CLUB_COLORS,
-        )
-        self.global_club_selector.grid(row=0, column=3)
-
-        theme.section_label(filter_frame, "Time Filter", color=Colors.SUCCESS).grid(row=0, column=0, padx=(0, 5))
-        SingleSelectDropdown(
-            filter_frame, filters_mod.TIME_FILTER_OPTIONS, self.global_time_var,
-            on_change=self._on_filter_changed, accent=Colors.SUCCESS, width=150,
-        ).grid(row=0, column=1)
 
         main_body = ctk.CTkFrame(self.root, fg_color=Colors.BG_BASE, corner_radius=0)
         main_body.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
@@ -1319,7 +1397,7 @@ class SimAnalyticsApp:
             self.refresh_all_active_plots()
 
         panel = DropdownPanel(
-            self.settings_button,
+            self.data_button,
             lambda card, close: build_manage_sessions_body(card, close, sessions, _on_toggle),
             width=430)
         self._manage_sessions_panel = panel
@@ -1399,10 +1477,82 @@ class SimAnalyticsApp:
             self._settings_panel = panel
         panel.toggle()
 
+    def _build_display_name_setting(self, card):
+        """The Display name field: the one public thing about a contribution.
+
+        Validates as you type rather than on save, and always shows what will
+        actually be published — including the generated fallback when the field
+        is blank — so the name is never a surprise at contribution time.
+        """
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x")
+        theme.body_label(row, "Display name",
+                         color=Colors.TEXT_PRIMARY).pack(side="left", padx=(0, 24))
+        entry = ctk.CTkEntry(
+            row, textvariable=self.settings_display_name, width=150,
+            height=theme.CONTROL_HEIGHT, corner_radius=theme.CONTROL_RADIUS,
+            font=theme.font("body"), fg_color="transparent",
+            border_color=Colors.BORDER, border_width=1,
+        )
+        entry.pack(side="right")
+
+        status = theme.body_label(card, "", color=Colors.TEXT_MUTED,
+                                  font=theme.font("caption"), wraplength=300,
+                                  justify="left", anchor="w")
+        status.pack(anchor="w", pady=(6, 0))
+
+        def _refresh(*_a):
+            if not status.winfo_exists():
+                return
+            raw = self.settings_display_name.get()
+            name = contribute.normalize_display_name(raw)
+            if name is not None:
+                status.configure(
+                    text=f"Your data appears on opengolflab.org as “{name}”.",
+                    text_color=Colors.TEXT_MUTED)
+            elif not raw.strip():
+                generated, _ = contribute.resolve_display_name(str(config.BASE_DIR), "")
+                status.configure(
+                    text=f"No name set — contributions go out as “{generated}”. "
+                         "Type a name to use your own.",
+                    text_color=Colors.TEXT_MUTED)
+            else:
+                status.configure(
+                    text=f"{contribute.DISPLAY_NAME_MIN}–{contribute.DISPLAY_NAME_MAX} "
+                         "characters, using letters, numbers, spaces, - or _ only. "
+                         "Until it's valid, the generated name is used.",
+                    text_color=Colors.WARNING)
+
+        # Persist on every keystroke (validated at the point of use, so a
+        # half-typed name is harmless) — there's no Save button in this panel,
+        # and a name lost to a click-away dismissal is exactly the kind of small
+        # betrayal that stops people bothering to set one.
+        #
+        # Bound to the entry rather than traced on the StringVar on purpose: the
+        # var outlives the panel, so a trace added here would stack up another
+        # copy on every open and write the setting N times per keystroke. These
+        # bindings die with the widget.
+        def _on_change(_event=None):
+            settings_mod.set("display_name", self.settings_display_name.get())
+            _refresh()
+
+        entry.bind("<KeyRelease>", _on_change, add="+")
+        entry.bind("<FocusOut>", _on_change, add="+")
+        _refresh()
+
+        theme.body_label(
+            card, "Shown publicly next to the data you contribute. Everything "
+                  "else in a contribution stays anonymous.",
+            color=Colors.TEXT_MUTED, font=theme.font("caption"),
+            wraplength=300, justify="left",
+        ).pack(anchor="w", pady=(4, 12))
+
     def _build_settings_body(self, card, close):
         """Fill the Settings dropdown panel. ``card`` is an already-scrollable
         body (see ui.components.DropdownPanel); ``close`` dismisses the panel."""
         theme.section_label(card, "Settings", color=Colors.INFO).pack(anchor="w", pady=(2, 10))
+
+        self._build_display_name_setting(card)
 
         # Display scale — persists across launches (see data/settings.py). Lets
         # the app be sized up on a projector / external display without
@@ -1544,10 +1694,10 @@ class SimAnalyticsApp:
 
         gspro_btns = ctk.CTkFrame(card, fg_color="transparent")
         gspro_btns.pack(fill="x")
-        theme.outline_button(gspro_btns, accent=Colors.INFO, text="Change folder…",
-                             command=_choose_gspro_dir, width=140).pack(side="left")
-        theme.outline_button(gspro_btns, accent=Colors.TEXT_MUTED, text="Use default",
-                             command=_reset_gspro_dir, width=110).pack(side="left", padx=(6, 0))
+        theme.ghost_button(gspro_btns, text="Change folder…",
+                           command=_choose_gspro_dir, width=140).pack(side="left")
+        theme.ghost_button(gspro_btns, text="Use default",
+                           command=_reset_gspro_dir, width=110).pack(side="left", padx=(6, 0))
         theme.body_label(card, "Where GSPro stores currentRound.dat / GSPro.db / Player.log "
                          "for live tracking. This is GSPro's per-user data folder "
                          "(AppData\\LocalLow\\GSPro\\GSPro), not where GSPro is installed. "
@@ -1555,12 +1705,10 @@ class SimAnalyticsApp:
                          color=Colors.TEXT_MUTED, font=theme.font("caption"),
                          wraplength=300, justify="left").pack(anchor="w", pady=(6, 12))
 
-        theme.outline_button(card, accent=Colors.INFO, text="Manage sessions…",
-                             command=lambda: (close(), self._open_manage_sessions()),
-                             width=170).pack(anchor="w", pady=(0, 12))
+        # "Manage sessions…" used to live here. It's an action on your data, not
+        # a preference, so it moved to the Data menu with Import and Contribute.
 
-        theme.outline_button(card, accent=Colors.TEXT_MUTED, text="Close",
-                             command=close, width=100).pack(side="right")
+        theme.ghost_button(card, text="Close", command=close, width=100).pack(side="right")
 
     def _sample_set_available(self) -> bool:
         """True if the selected demo dataset's folder exists with data in it;
@@ -1962,8 +2110,8 @@ class SimAnalyticsApp:
             entry["sc_session_dd"] = sc_dd
 
         if name == CLUB_COMPARE_NAME:
-            theme.outline_button(
-                top_bar, accent=Colors.WARNING, text="Configure…",
+            theme.ghost_button(
+                top_bar, text="Configure…",
                 command=lambda n=name: self._open_club_config(n), width=120,
             ).pack(side=tk.LEFT, padx=(20, 6))
             theme.body_label(top_bar, "Now hitting:", color=Colors.TEXT_MUTED).pack(side=tk.LEFT, padx=(0, 4))
@@ -1975,12 +2123,12 @@ class SimAnalyticsApp:
             rec_dd.pack(side=tk.LEFT, padx=(0, 6))
             entry["cc_record_dd"] = rec_dd
             self._cc_refresh_record_dd(entry)
-            theme.outline_button(
-                top_bar, accent=Colors.TEXT_MUTED, text="Clear",
+            theme.ghost_button(
+                top_bar, text="Clear",
                 command=lambda n=name: self._cc_clear(n), width=70,
             ).pack(side=tk.LEFT, padx=(0, 4))
-            theme.outline_button(
-                top_bar, accent=Colors.SUCCESS, text="Export",
+            theme.ghost_button(
+                top_bar, text="Export",
                 command=lambda n=name: self._export_club_compare(n), width=80,
             ).pack(side=tk.LEFT, padx=(0, 4))
 

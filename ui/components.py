@@ -55,10 +55,16 @@ class _PopupDropdownBase(ctk.CTkFrame):
     """
 
     def __init__(self, master, accent=Colors.INFO, width=170, **kwargs):
+        # `accent` is accepted and ignored. Every dropdown used to draw its own
+        # 2px accent border in whatever color the call site felt like, which is
+        # what made a screen of filters read as unrelated toys. They're all one
+        # neutral chip now; the parameter stays so the ~20 existing call sites
+        # don't need churn, and so a caller can't accidentally reintroduce a
+        # per-dropdown color by passing it.
         super().__init__(master, fg_color="transparent")
         self._popup: ctk.CTkToplevel | None = None
         self._root_binds_installed = False
-        self.button = theme.outline_button(self, accent=accent, command=self._toggle_popup, width=width)
+        self.button = theme.chip_button(self, command=self._toggle_popup, width=width)
         self.button.pack()
 
     def _toggle_popup(self):
@@ -117,7 +123,7 @@ class _PopupDropdownBase(ctk.CTkFrame):
         y = self.button.winfo_rooty() + self.button.winfo_height() + 2
         self._popup.geometry(f"+{x}+{y}")
 
-        card = theme.card_frame(self._popup, corner_radius=8)
+        card = theme.card_frame(self._popup, corner_radius=theme.SURFACE_RADIUS)
         card.pack(fill="both", expand=True, padx=1, pady=1)
 
         # Kept for platforms where the popup does take focus (harmless
@@ -193,32 +199,78 @@ class DropdownPanel:
         self._popup.configure(fg_color=Colors.BG_SURFACE)
         self._popup.bind("<Escape>", lambda _e: self.close())
 
-        outer = theme.card_frame(self._popup, corner_radius=8)
+        outer = theme.card_frame(self._popup, corner_radius=theme.SURFACE_RADIUS)
         outer.pack(fill="both", expand=True, padx=1, pady=1)
         self._body = ctk.CTkScrollableFrame(
             outer, fg_color="transparent", width=self.width,
             scrollbar_button_color=Colors.BG_HOVER)
         self._body.pack(fill="both", expand=True, padx=4, pady=4)
 
-        self.build_content(self._body, self.close)
+        # Content goes into a plain frame inside the scroll body, not into the
+        # scroll body itself, purely so we have something whose reqheight is the
+        # *natural* height of the content. A CTkScrollableFrame always reports
+        # its own fixed height (CTk's ~200px default when none is given), which
+        # is why every panel used to open 200px tall and immediately scroll —
+        # Settings worst of all. See _reposition.
+        self._content = ctk.CTkFrame(self._body, fg_color="transparent")
+        self._content.pack(fill="both", expand=True)
+
+        self.build_content(self._content, self.close)
         self._reposition()
+
+    _MARGIN_BOTTOM = 12
+    _MIN_H = 80    # floor for a pathologically short window; below this, scroll
+    _CHROME_FALLBACK = 22  # only used before the popup has been laid out once
+
+    def _chrome(self) -> int:
+        """Pixels the popup needs *on top of* the content height: our card
+        border and pads, plus CTkScrollableFrame's own internal padding.
+
+        Measured rather than hard-coded, because part of it comes from CTk
+        internals and a wrong guess is exactly the bug this class had — being
+        8px short is what clips the last line of a panel and leaves a scrollbar
+        on content that would otherwise fit. Falls back to a constant if CTk's
+        private canvas attribute ever moves.
+        """
+        canvas = getattr(self._body, "_parent_canvas", None)
+        if canvas is None or canvas.winfo_height() <= 1:
+            return self._CHROME_FALLBACK
+        return max(0, self._popup.winfo_height() - canvas.winfo_height())
 
     def _reposition(self):
         if not self.is_open():
             return
-        self._popup.update_idletasks()
+        popup = self._popup
+        popup.update_idletasks()
+
         ax, ay = self.anchor.winfo_rootx(), self.anchor.winfo_rooty()
         below = ay + self.anchor.winfo_height() + 2
-        w = max(self.width + 24, self._popup.winfo_reqwidth())
-        h = self._popup.winfo_reqheight()
-        sw = self._popup.winfo_screenwidth()
-        sh = self._popup.winfo_screenheight()
-        # Keep the panel on-screen: clamp width against the right edge and
-        # height against the bottom (the body scrolls if it's taller).
-        w = min(w, sw - 16)
-        h = min(h, max(200, sh - below - 16))
+
+        # Room available before we'd run off the bottom of the app window. The
+        # app window (not the screen) is the bound on purpose: a panel hanging
+        # past the window onto the desktop behind it looks broken, and on a tall
+        # screen with a small window the screen bound is no bound at all.
+        root = self.anchor.winfo_toplevel()
+        window_bottom = root.winfo_rooty() + root.winfo_height()
+        available = (min(window_bottom, popup.winfo_screenheight())
+                     - below - self._MARGIN_BOTTOM)
+
+        sw = popup.winfo_screenwidth()
+        w = min(max(self.width + 24, popup.winfo_reqwidth()), sw - 16)
         x = min(ax, max(0, sw - w - 8))
-        self._popup.geometry(f"{w}x{h}+{x}+{below}")
+
+        # Two passes: _chrome() can only be measured once the popup has been
+        # laid out at some height, so size it, look at what actually
+        # materialized, then size it for real.
+        for _ in range(2):
+            # Natural height of the *content*, never the scroll viewport — a
+            # CTkScrollableFrame always reports its own fixed height.
+            natural = self._content.winfo_reqheight() + self._chrome()
+            # Short content hugs its natural height (no dead space); tall
+            # content stops at the window edge and scrolls from there.
+            h = max(self._MIN_H, min(natural, available))
+            popup.geometry(f"{w}x{h}+{x}+{below}")
+            popup.update_idletasks()
 
     def _install_root_binds(self, root):
         if self._root_binds_installed:
@@ -251,6 +303,22 @@ class DropdownPanel:
             self._popup = None
         if self.on_close:
             self.on_close()
+
+
+def menu_item(parent, text: str, command, *, width: int = 240) -> ctk.CTkButton:
+    """One row of a dropdown menu (see DropdownPanel).
+
+    A full-width, left-aligned ghost button — a button rather than a bound label
+    so it inherits the standard hover / pressed / disabled states instead of
+    reimplementing them per menu. One step up from the default control font
+    ("subheading" vs "label") so menu rows read as their own list, a touch
+    larger than the top-bar triggers that open them.
+    """
+    btn = theme.ghost_button(parent, text=text, command=command, anchor="w",
+                             width=width, font=theme.font("subheading"),
+                             height=theme.CONTROL_HEIGHT + 4)
+    btn.pack(fill="x", pady=1)
+    return btn
 
 
 class SingleSelectDropdown(_PopupDropdownBase):
@@ -356,17 +424,19 @@ class MultiSelectDropdown(_PopupDropdownBase):
 
         actions = ctk.CTkFrame(card, fg_color="transparent")
         actions.pack(fill="x", padx=8, pady=(8, 4))
-        theme.solid_button(
-            actions, color=Colors.BG_HOVER, hover=Colors.BORDER, text="All",
-            width=60, height=24, font=theme.font("caption"), command=self._select_all,
+        # All / None are secondary shortcuts; Done is the one primary action in
+        # this popup — the same one-primary-per-surface rule the top bar follows.
+        theme.chip_button(
+            actions, text="All", width=60, height=theme.CONTROL_HEIGHT_SM,
+            font=theme.font("caption"), command=self._select_all,
         ).pack(side="left", padx=(0, 4))
-        theme.solid_button(
-            actions, color=Colors.BG_HOVER, hover=Colors.BORDER, text="None",
-            width=60, height=24, font=theme.font("caption"), command=self._select_none,
+        theme.chip_button(
+            actions, text="None", width=60, height=theme.CONTROL_HEIGHT_SM,
+            font=theme.font("caption"), command=self._select_none,
         ).pack(side="left")
-        theme.solid_button(
-            actions, color=Colors.ACCENT, hover=Colors.ACCENT_HOVER, text="Done",
-            width=60, height=24, font=theme.font("caption"), command=self._close_popup,
+        theme.primary_button(
+            actions, text="Done", width=60, height=theme.CONTROL_HEIGHT_SM,
+            font=theme.font("caption", "bold"), command=self._close_popup,
         ).pack(side="right")
 
         list_height = min(320, max(1, len(self.variables)) * 30 + 10)
