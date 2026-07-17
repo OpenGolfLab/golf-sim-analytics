@@ -101,6 +101,25 @@ class _PopupDropdownBase(ctk.CTkFrame):
         if self._popup_open() and str(event.widget) == str(self.winfo_toplevel()):
             self._close_popup()
 
+    def _watch_root_state(self):
+        """Belt-and-braces for minimize: poll the main window's state while the
+        popup is open and close when it's no longer visible. The <Unmap> bind
+        above is the primary mechanism, but these popups are overrideredirect +
+        topmost windows — the one kind whose event delivery the OS shell is
+        allowed to get creative with — and a popup left floating over other
+        applications is bad enough to warrant a 150 ms heartbeat while open."""
+        if not self._popup_open():
+            return
+        try:
+            state = self.winfo_toplevel().state()
+        except tk.TclError:
+            self._close_popup()
+            return
+        if state in ("iconic", "withdrawn"):
+            self._close_popup()
+        else:
+            self._popup.after(150, self._watch_root_state)
+
     def _on_root_click(self, event):
         """Click-away: any press in the parent window closes the popup.
         Clicks *inside* the popup land on the popup's own toplevel and never
@@ -141,6 +160,7 @@ class _PopupDropdownBase(ctk.CTkFrame):
         # elsewhere): Escape / focus-loss inside the popup still dismiss.
         self._popup.bind("<Escape>", lambda e: self._close_popup())
         self._popup.bind("<FocusOut>", self._on_popup_focus_out)
+        self._popup.after(150, self._watch_root_state)
         return card
 
     def _on_popup_focus_out(self, event):
@@ -228,6 +248,7 @@ class DropdownPanel:
 
         self.build_content(self._content, self.close)
         self._reposition()
+        self._popup.after(150, self._watch_root_state)
 
     _MARGIN_BOTTOM = 12
     _MIN_H = 80    # floor for a pathologically short window; below this, scroll
@@ -303,6 +324,23 @@ class DropdownPanel:
     def _on_root_unmap(self, event):
         if self.is_open() and str(event.widget) == str(self.anchor.winfo_toplevel()):
             self.close()
+
+    def _watch_root_state(self):
+        """Belt-and-braces for minimize — see _PopupDropdownBase._watch_root_state.
+        Polls the main window's state while the panel is open; a panel left
+        floating over other applications after a minimize is the failure this
+        guards against, independent of <Unmap> delivery."""
+        if not self.is_open():
+            return
+        try:
+            state = self.anchor.winfo_toplevel().state()
+        except tk.TclError:
+            self.close()
+            return
+        if state in ("iconic", "withdrawn"):
+            self.close()
+        else:
+            self._popup.after(150, self._watch_root_state)
 
     def _on_root_click(self, event):
         # A click inside the panel lands on the panel's own toplevel and never
