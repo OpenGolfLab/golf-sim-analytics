@@ -127,6 +127,25 @@ def test_tall_panel_caps_at_two_thirds_and_scrolls(make_panel, root):
     assert cap_bottom - panel_bottom <= DropdownPanel._MARGIN_BOTTOM + 4
 
 
+def test_switching_to_another_app_closes_the_panel(make_panel, root, monkeypatch):
+    """The failure users actually hit: clicking another application leaves the
+    root window "normal" (no Unmap, no state change), while the topmost popup
+    keeps floating above the other app. The watchdog must catch it via the
+    foreground-process check. The Win32 call is stubbed so the test doesn't
+    depend on juggling real OS windows; the call itself was verified live."""
+    import ui.components as components
+
+    p = make_panel(n_rows=3)
+    assert p.is_open()
+    monkeypatch.setattr(components, "_foreground_is_this_app", lambda: False)
+
+    deadline = time.time() + 2
+    while p.is_open() and time.time() < deadline:
+        root.update()
+        time.sleep(0.05)
+    assert not p.is_open(), "panel must close when another app takes the foreground"
+
+
 def test_minimizing_the_window_closes_the_panel(make_panel, root):
     """The panel is an overrideredirect+topmost toplevel the window manager
     doesn't tie to the app — minimizing must not leave it floating over other
