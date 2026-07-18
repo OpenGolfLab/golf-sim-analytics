@@ -59,6 +59,19 @@ def root():
         pass
 
 
+@pytest.fixture(autouse=True)
+def _foreground(monkeypatch):
+    """Pretend the app is the OS foreground window for every test here.
+
+    DropdownPanel's minimize/app-switch watchdog closes the panel when another
+    process owns the foreground window — and during a test run the pytest
+    terminal usually does, which would slam every panel shut mid-measurement.
+    Tests that specifically exercise the app-switch behaviour re-stub this to
+    return False themselves."""
+    import ui.components as components
+    monkeypatch.setattr(components, "_foreground_is_this_app", lambda: True)
+
+
 @pytest.fixture
 def make_panel(root):
     """Open a DropdownPanel whose content is `n_rows` fixed-height rows,

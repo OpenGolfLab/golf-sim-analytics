@@ -2292,13 +2292,15 @@ class SimAnalyticsApp:
             # practice-only master_df deliberately excludes (see _full_df).
             df_filtered = on_course.on_course_view(self._full_df)
         elif name == COMMUNITY_NAME:
-            # Remote community shots (fetched off-thread on first open), narrowed
-            # by the global Club Filter like every other dashboard.
+            # Remote community medians (fetched off-thread on first open). Shown
+            # in FULL — deliberately NOT narrowed by the global Club Filter,
+            # which is populated from the user's own bag: filtering by it would
+            # hide every community club the user hasn't personally hit (a 3-club
+            # user would see 3 clubs of community data). The community view is
+            # about everyone else, so it ignores that filter like Timeline
+            # ignores the Time filter.
             self._ensure_community_data()
             df_filtered = self._community_df if self._community_df is not None else pd.DataFrame()
-            if not df_filtered.empty and "club" in df_filtered.columns:
-                df_filtered = df_filtered[
-                    df_filtered["club"].isin(self._selected_global_clubs())]
         elif name in (GAPPING_NAME, LAUNCH_SPIN_NAME):
             df_filtered = df_gap
         else:

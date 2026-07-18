@@ -462,7 +462,9 @@ def send_bundle(df: pd.DataFrame, *, app_dir: str, url: str, key: str | None = N
         headers["X-OGL-Key"] = key
     req = urllib.request.Request(url, data=payload, method="POST", headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        import netutil
+        with urllib.request.urlopen(req, timeout=timeout,
+                                    context=netutil.ssl_context()) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "ignore")
