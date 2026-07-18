@@ -42,6 +42,12 @@ OPENGOLFLAB_INTAKE_KEY = ""
 # ever gets a WAF skip rule for /data/*, this can switch to the custom domain.
 OPENGOLFLAB_COMMUNITY_URL = "https://opengolflab.etsmith1414.workers.dev/data"
 
+# Ko-fi support link ("Fuel the Lab", same wording as opengolflab.com). Shown
+# as a quiet link in the Community sidebar section and at the bottom of the
+# Contribute panel — the app's only support ask, and deliberately a passive
+# one: no popups, no persistent chrome. Blank disables both links.
+KOFI_URL = "https://ko-fi.com/opengolflab"
+
 
 # ---------------------------------------------------------------------------
 # Base paths

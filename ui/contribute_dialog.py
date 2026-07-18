@@ -16,6 +16,7 @@ before submitting.
 from __future__ import annotations
 
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog
 
 import customtkinter as ctk
@@ -491,6 +492,23 @@ def build_contribute_body(card, close, configured_name: str | None = None):
     preview_btn = theme.ghost_button(receipt_btns, text="Export site preview",
                                      command=_save_site_preview, width=170)
     preview_btn.pack(side="left")
+
+    # ---- fuel the lab (quiet, last) ----
+    # The one support ask in the panel, below everything functional. It sits
+    # here rather than in the send flow because the thank-you moment shouldn't
+    # read as an invoice — contributing data IS supporting the project.
+    kofi_url = getattr(config, "KOFI_URL", "")
+    if kofi_url:
+        theme.divider(card).pack(fill="x", pady=(12, 8))
+        theme.body_label(
+            card, "OpenGolfLab is free and community-funded. Contributions like "
+            "yours are the data; Ko-fi keeps it running.",
+            color=Colors.TEXT_MUTED, font=theme.font("caption"),
+            wraplength=420, justify="left", anchor="w").pack(anchor="w", pady=(0, 6))
+        theme.ghost_button(
+            card, text="☕ Fuel the Lab", width=140,
+            command=lambda: webbrowser.open_new_tab(kofi_url),
+        ).pack(anchor="w")
 
     def _refresh_receipts():
         state = "normal" if sent_payload.get("manifest") else "disabled"
