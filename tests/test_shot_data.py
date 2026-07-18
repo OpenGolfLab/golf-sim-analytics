@@ -102,6 +102,69 @@ def test_archive_round_writes_flattened_parquet_and_raw_json(tmp_path):
     assert raw[0]["ShotID"] == SAMPLE_SHOT["ShotID"]
 
 
+def test_archive_round_snapshots_the_club_lookup_once(tmp_path):
+    """The archive burst must cost ONE GSPro.db read (snapshot), never a
+    fresh connection per shot — GSPro is writing its own round data at the
+    exact moment rounds archive (see live/gspro_db.py)."""
+    data_dir = tmp_path / "parquet_data"
+    raw_dir = tmp_path / "live_rounds_raw"
+    data_dir.mkdir()
+    raw_dir.mkdir()
+
+    class _Snap:
+        def __init__(self):
+            self.lookups = 0
+
+        def lookup(self, ball_speed, carry):
+            self.lookups += 1
+            return {"clubspeed": 110.0}
+
+    class _Lookup:
+        def __init__(self):
+            self.snapshots = 0
+            self.direct_lookups = 0
+            self.snap = _Snap()
+
+        def snapshot(self, expected_shots=0):
+            self.snapshots += 1
+            return self.snap
+
+        def lookup(self, ball_speed, carry):
+            self.direct_lookups += 1
+            return {}
+
+    lk = _Lookup()
+    shots = [SAMPLE_SHOT, {**SAMPLE_SHOT, "ShotID": "second-shot"}]
+    archive_round(shots, data_dir, raw_dir, club_lookup=lk)
+
+    assert lk.snapshots == 1       # one DB read for the whole round
+    assert lk.direct_lookups == 0  # never once-per-shot against the DB
+    assert lk.snap.lookups == 2    # every shot still matched, from memory
+
+
+def test_archive_round_on_course_never_touches_the_club_lookup(tmp_path):
+    """DrivingRangeShot only holds range shots, so on-course rounds can't
+    match — archiving one must not open GSPro.db at all."""
+    data_dir = tmp_path / "parquet_data"
+    raw_dir = tmp_path / "live_rounds_raw"
+    data_dir.mkdir()
+    raw_dir.mkdir()
+
+    class _Explodes:
+        def snapshot(self, expected_shots=0):
+            raise AssertionError("on-course archive must not touch GSPro.db")
+
+        def lookup(self, ball_speed, carry):
+            raise AssertionError("on-course archive must not touch GSPro.db")
+
+    shots = [{**SAMPLE_SHOT, "RoundID": 42}]
+    info = archive_round(shots, data_dir, raw_dir, club_lookup=_Explodes())
+
+    assert info["round_type"] == "on_course"
+    df = pd.read_parquet(info["parquet_path"])
+    assert "clubspeed" not in df.columns  # nothing enriched, same as before
+
+
 def test_archive_round_session_id_embeds_a_parseable_date(tmp_path):
     from data.io import extract_date_from_filename
 
