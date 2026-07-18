@@ -186,6 +186,15 @@ class SimAnalyticsApp:
         # needs to pick up the next shot. Cleared once the round archives.
         self.live_shot_buffer: list[dict] = []
 
+        # Debounced post-archive dashboard refresh (see _on_round_archived):
+        # pending means "a round archived but the expensive reload/rebuild
+        # hasn't run yet"; job is the pending Tk after() id. The immediate
+        # flag routes explicit user actions (End Round, leaving live) around
+        # the debounce — they refresh right away.
+        self._archive_refresh_pending = False
+        self._archive_refresh_job: str | None = None
+        self._refresh_now_on_archive = False
+
         # Community dashboard: shots fetched from the OpenGolfLab read API
         # (community.py) are cached here after a one-time background fetch when
         # the dashboard is first opened. _community_status drives the empty/
@@ -418,6 +427,10 @@ class SimAnalyticsApp:
     def make_toggle_cmd(self, entry):
         def cmd():
             self.show_landing_page = False
+            # If an auto-archived round's refresh is still deferred (see
+            # _on_round_archived), land it before this switch renders anything
+            # — dashboards must be current the moment they're looked at.
+            self._flush_archive_refresh()
             name = entry["def"].name
 
             # Picking any sidebar dashboard leaves live mode (it owns the grid).
@@ -528,16 +541,25 @@ class SimAnalyticsApp:
         archive we optionally say so, rather than leaving the click looking
         like it did nothing.
         """
+        # Explicit end: the user is at the app expecting the round to appear
+        # now, so the archive callback refreshes immediately rather than
+        # debouncing (see _on_round_archived). The flag is consumed by the
+        # callback; when nothing archives (no callback), reset it here so it
+        # can't leak onto a later auto-archive.
+        self._refresh_now_on_archive = True
         try:
             info = self.round_watcher.finalize_now()
         except Exception:
+            self._refresh_now_on_archive = False
             log.exception("End Round: could not archive the in-progress round")
             if show_feedback:
                 show_toast(self.root, "Couldn't archive the current round — see the log.",
                            tone="warning")
             return
-        if info is None and show_feedback:
-            show_toast(self.root, "No new shots to archive yet.", tone="warning")
+        if info is None:
+            self._refresh_now_on_archive = False
+            if show_feedback:
+                show_toast(self.root, "No new shots to archive yet.", tone="warning")
 
     # ------------------------------------------------------------------
     # GSPro data folder (live-tracking source) — resolvable + re-pointable.
@@ -1348,6 +1370,10 @@ class SimAnalyticsApp:
         else changes yet (the shot isn't archived to Parquet until the
         round finalizes, see _on_round_archived)."""
         self.live_shot_buffer.append(flat_shot)
+        # Actively hitting: push any pending post-archive refresh further out
+        # so the heavy reload never runs between shots (see _on_round_archived).
+        if self._archive_refresh_pending:
+            self._schedule_archive_refresh()
         self._check_speed_record(flat_shot)
 
         # Club Comparison live capture: if a config is armed via "Now hitting",
@@ -1468,6 +1494,55 @@ class SimAnalyticsApp:
             f"Archived {info['shot_count']} live-tracked shot{plural} from your {label} round.",
             tone="success",
         )
+        # The round is safely on disk at this point. The reload/rebuild/repaint
+        # below is the single heaviest thing this app does, and the auto-archive
+        # path lands here moments after the user's FIRST SWING of their next
+        # GSPro session — so for auto-archives it's debounced until live shots
+        # go quiet. Explicit user actions (End Round, leaving live mode) set
+        # _refresh_now_on_archive because the user is at the app waiting to see
+        # the round; those refresh immediately, same as before.
+        if self._refresh_now_on_archive:
+            self._refresh_now_on_archive = False
+            self._cancel_archive_refresh_job()
+            self._archive_refresh_pending = True
+            self._run_archive_refresh()
+        else:
+            self._schedule_archive_refresh()
+
+    def _schedule_archive_refresh(self) -> None:
+        """(Re)start the quiet-period countdown for a pending post-archive
+        refresh. Called on archive, and again on every new live shot while
+        pending — so the refresh only ever runs once shots have stopped for
+        config.LIVE_ARCHIVE_REFRESH_QUIET_SECONDS."""
+        self._cancel_archive_refresh_job()
+        self._archive_refresh_pending = True
+        self._archive_refresh_job = self.root.after(
+            int(config.LIVE_ARCHIVE_REFRESH_QUIET_SECONDS * 1000),
+            self._run_archive_refresh,
+        )
+
+    def _cancel_archive_refresh_job(self) -> None:
+        if self._archive_refresh_job is not None:
+            try:
+                self.root.after_cancel(self._archive_refresh_job)
+            except Exception:
+                pass
+            self._archive_refresh_job = None
+
+    def _flush_archive_refresh(self) -> None:
+        """Run a pending post-archive refresh right now. Called from user
+        interactions that are about to render historical data (switching
+        dashboards), so a deferred refresh can never show someone stale
+        history when they're actually looking."""
+        if self._archive_refresh_pending:
+            self._cancel_archive_refresh_job()
+            self._run_archive_refresh()
+
+    def _run_archive_refresh(self) -> None:
+        self._archive_refresh_job = None
+        if not self._archive_refresh_pending:
+            return
+        self._archive_refresh_pending = False
         self.load_master_data()
         self.build_grid()
         self.refresh_all_active_plots()

@@ -148,6 +148,18 @@ def archive_round(
     round_type = round_type_for(raw_shots)
     session_id = f"{finalized_at.strftime(SESSION_ID_FORMAT)}-{round_type}"
 
+    # Archive-time club lookups come as a burst — one per shot, all within
+    # milliseconds. Collapse that to a single GSPro.db read via snapshot()
+    # (see live/gspro_db.py: GSPro is busy writing its own round data right
+    # now, so don't open its database once per shot). On-course rounds skip
+    # the database entirely: DrivingRangeShot only ever holds range shots,
+    # so no on-course shot can match — identical result, zero contention.
+    if club_lookup is not None:
+        if round_type == "on_course":
+            club_lookup = None
+        elif hasattr(club_lookup, "snapshot"):
+            club_lookup = club_lookup.snapshot(expected_shots=len(raw_shots))
+
     rows = [flatten_shot(shot, club_lookup) for shot in raw_shots]
     df = pd.DataFrame(rows)
     df["session_date"] = finalized_at

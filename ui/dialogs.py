@@ -9,6 +9,7 @@ stacking when several fire in a row.
 """
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 
 import customtkinter as ctk
@@ -34,6 +35,38 @@ def _set_alpha(win, value: float) -> None:
         win.attributes("-alpha", value)
     except tk.TclError:
         pass  # platform without per-window alpha: toast just appears/disappears
+
+
+def _make_noactivate(win) -> None:
+    """Stop this toast from ever becoming the active window (Windows).
+
+    Toasts are topmost, so they appear over whatever application is foreground
+    — including GSPro mid-round, where any focus loss can stop shots from
+    registering. WS_EX_NOACTIVATE means neither showing the toast nor clicking
+    it activates it: the game keeps keyboard focus, and click-to-dismiss still
+    works because the window still receives mouse input. WS_EX_TOOLWINDOW
+    keeps it out of Alt-Tab (belt-and-braces alongside overrideredirect).
+
+    Best-effort: on any failure (or non-Windows platform) the toast behaves
+    exactly as before.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        GWL_EXSTYLE = -20
+        WS_EX_NOACTIVATE = 0x08000000
+        WS_EX_TOOLWINDOW = 0x00000080
+        user32 = ctypes.windll.user32
+        # Tk parents a Toplevel's client window inside a WM frame; the frame is
+        # what Windows activates. overrideredirect windows may have no frame,
+        # in which case the client hwnd is the top-level one.
+        hwnd = user32.GetParent(win.winfo_id()) or win.winfo_id()
+        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        user32.SetWindowLongW(hwnd, GWL_EXSTYLE,
+                              style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
+    except Exception:
+        pass
 
 
 def show_toast(root, message: str, tone: str = "info", duration_ms: int = 4500) -> None:
@@ -66,6 +99,7 @@ def show_toast(root, message: str, tone: str = "info", duration_ms: int = 4500) 
     lbl.pack(side="left", padx=(4, 16), pady=12)
 
     win.update_idletasks()
+    _make_noactivate(win)  # after update_idletasks so the hwnd exists
     # measure the card, not the toplevel — a fresh CTkToplevel reports its
     # 200x200 default before geometry is applied, inflating the toast
     w, h = card.winfo_reqwidth(), card.winfo_reqheight()

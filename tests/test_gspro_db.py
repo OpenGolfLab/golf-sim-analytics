@@ -90,3 +90,40 @@ def test_flatten_shot_uses_gspro_club_and_drops_clubindex(tmp_path):
     assert flat["club"] == "Pw"
     # club_index dropped so load-time re-resolution can't clobber it back to Dr.
     assert flat["club_index"] is None
+
+
+# --- snapshot(): archive-time bursts read the DB once, then stay in memory ---
+
+def test_snapshot_answers_from_memory_not_the_db(tmp_path):
+    db = tmp_path / "GSPro.db"
+    _make_db(db, [{"BallSpeed": 154.07, "Carry": 218.6, "ClubSpeed": 123.0,
+                   "SmashFactor": 1.25, "AoA": 0.54}])
+    snap = ClubDataLookup(db).snapshot(expected_shots=5)
+    db.unlink()  # if any later lookup touched the DB, it would find nothing
+    out = snap.lookup(154.07, 218.6)
+    assert out == {"clubspeed": 123.0, "smashfactor": 1.25, "aoa": 0.54, "club": "Dr"}
+
+
+def test_snapshot_matches_the_live_lookup(tmp_path):
+    db = tmp_path / "GSPro.db"
+    _make_db(db, [{"BallSpeed": 150.0, "Carry": 180.0, "ClubSpeed": 100.0},
+                  {"BallSpeed": 150.0, "Carry": 250.0, "ClubSpeed": 130.0}])
+    lookup = ClubDataLookup(db)
+    assert lookup.snapshot().lookup(150.0, 250.0) == lookup.lookup(150.0, 250.0)
+
+
+def test_snapshot_covers_rounds_longer_than_the_live_window(tmp_path):
+    # Three rows against a live window of two: the per-shot lookup can't see
+    # the oldest shot, but a snapshot sized for the whole round can.
+    db = tmp_path / "GSPro.db"
+    _make_db(db, [{"BallSpeed": 100.0, "Carry": 150.0, "ClubSpeed": 90.0},
+                  {"BallSpeed": 120.0, "Carry": 170.0, "ClubSpeed": 95.0},
+                  {"BallSpeed": 140.0, "Carry": 190.0, "ClubSpeed": 100.0}])
+    lookup = ClubDataLookup(db, max_rows=2)
+    assert lookup.lookup(100.0, 150.0) == {}  # outside the live window
+    assert lookup.snapshot(expected_shots=3).lookup(100.0, 150.0)["clubspeed"] == 90.0
+
+
+def test_snapshot_missing_db_is_safe(tmp_path):
+    snap = ClubDataLookup(tmp_path / "nope.db").snapshot(expected_shots=10)
+    assert snap.lookup(150.0, 200.0) == {}

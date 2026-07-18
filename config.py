@@ -18,7 +18,7 @@ from pathlib import Path
 # bundles (see contribute.py) so shared data is traceable to a build. Also
 # shown at the bottom of the Settings panel, so "which build am I actually
 # running?" is answerable at a glance — bump this on any user-visible change.
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 
 # OpenGolfLab intake Worker. Paste your deployed Cloudflare Worker URL here to
 # enable one-click "Send to OpenGolfLab" in the Contribute dialog. Leave blank
@@ -138,6 +138,14 @@ GSPRO_ROUND_FILE = GSPRO_DEFAULT_DATA_DIR / "currentRound.dat"
 # currentRound.dat strips out — read live to enrich live-tracked shots.
 GSPRO_DB_FILE = GSPRO_DEFAULT_DATA_DIR / "GSPro.db"
 LIVE_POLL_SECONDS = 2.0
+# A round auto-archives the moment the watcher sees the FIRST shot of the
+# NEXT session — i.e. while the user is mid-swing-routine in GSPro. The
+# archive itself (parquet + raw JSON) still happens immediately; what waits
+# is the expensive UI side (full history reload + rebuilding every panel),
+# deferred until this many seconds have passed with no new live shot, so
+# the heaviest work in the app never runs while shots are coming in.
+# Explicit user actions (End Round, leaving live mode) refresh immediately.
+LIVE_ARCHIVE_REFRESH_QUIET_SECONDS = 10.0
 
 # Full-fidelity raw JSON snapshot of every finalized live-tracked round
 # (every field GSPro wrote, including full ball-flight trajectories) lives
