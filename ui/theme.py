@@ -284,6 +284,9 @@ def section_card(master, title: str, accent: str = Colors.ACCENT, icon: str = ""
 
     body = ctk.CTkFrame(card, fg_color="transparent")
     body.pack(fill="both", expand=True, padx=8, pady=(4, 10))
+    # Exposed so a caller can add a trailing widget on the title row (packed
+    # side="right"), e.g. the Community section's Fuel-the-Lab link.
+    card.header = header
     return card, body
 
 

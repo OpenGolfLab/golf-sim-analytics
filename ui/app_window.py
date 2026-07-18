@@ -982,22 +982,22 @@ class SimAnalyticsApp:
         for d in DASHBOARDS:
             if d.category == "Community":
                 self._nav_item(community_body, d)
-        self._kofi_link(community_body)
+        self._kofi_link(community_card.header)
 
-    def _kofi_link(self, parent):
-        """A quiet "Fuel the Lab" link under the Community nav — the app's only
-        support ask, kept passive on purpose (the pitch is free/no-strings, so
-        no popups and no top-bar chrome). Lives in the Community section because
-        that's the surface Ko-fi actually funds."""
+    def _kofi_link(self, header):
+        """A quiet "Fuel the Lab" link on the Community section's title row —
+        the app's only support ask, kept passive on purpose (the pitch is
+        free/no-strings, so no popups and no top-bar chrome). Lives in the
+        Community section because that's the surface Ko-fi actually funds."""
         url = getattr(config, "KOFI_URL", "")
         if not url:
             return
         btn = theme.ghost_button(
-            parent, text="☕ Fuel the Lab", height=26, anchor="w",
+            header, text="☕ Fuel the Lab", width=10, height=22,
             font=theme.font("caption"), text_color=Colors.TEXT_MUTED,
             command=lambda: webbrowser.open_new_tab(url),
         )
-        btn.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(2, 6))
+        btn.pack(side="right")
         attach_tooltip(btn, "OpenGolfLab is free and community-funded — "
                             "fueling the Lab keeps the community data running.")
 
