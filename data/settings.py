@@ -45,6 +45,13 @@ DEFAULTS: dict = {
     # here lives in contribute.normalize_display_name, next to the code that
     # puts it on the wire.
     "display_name": "",
+    # Self-reported age band ("under 30" … "70+", "unknown" = prefer not to
+    # say) and bag-level equipment ({driver|irons|wedges: {brand, model}}).
+    # Both optional, both persisted so a contributor enters them once, not per
+    # contribution. Validation lives in contribute (AGE_BANDS /
+    # normalize_equipment) next to the code that puts them on the wire.
+    "age_band": "unknown",
+    "equipment": {},
     # Override for GSPro's per-user data folder (where currentRound.dat /
     # GSPro.db / Player.log live) used by live tracking. Blank = the standard
     # auto-detected location (config.GSPRO_DEFAULT_DATA_DIR); only non-standard

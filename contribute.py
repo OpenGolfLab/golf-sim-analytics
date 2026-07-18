@@ -24,13 +24,56 @@ from data.columns import (
     DESCENT_ANGLE_ALIASES, SPIN_RATE_ALIASES, START_DIR_ALIASES, SPIN_AXIS_ALIASES,
 )
 
-SCHEMA_VERSION = "1.3"   # 1.1 = structured environment.instrument (see instrument_block)
+SCHEMA_VERSION = "1.4"   # 1.1 = structured environment.instrument (see instrument_block)
                          # 1.2 = + instrument.verification (claimed monitor vs
                          #       the connectType GSPro's own log reported)
                          # 1.3 = + display_name (the public name shown beside a
                          #       contribution on opengolflab.org)
+                         # 1.4 = + self_report.age_band and equipment
+                         #       {driver,irons,wedges}{brand,model} — all
+                         #       optional, all self-declared, for the site's
+                         #       community filters
 CONSENT_POLICY_VERSION = "1.0"
 HANDICAP_BANDS = ["scratch", "1-4", "5-9", "10-14", "15-19", "20-24", "25+", "unknown"]
+
+# Age is collected as a BAND, never an exact number — it's published in the
+# manifest next to a public display name, and "42" next to a name is a lot more
+# identifying than "40-49". "unknown" (shown as "Prefer not to say") is the
+# default; contribution never requires it.
+AGE_BANDS = ["under 30", "30-39", "40-49", "50-59", "60-69", "70+", "unknown"]
+
+# Equipment is bag-level: one optional brand+model for the driver, the iron set,
+# and the wedges. Brands come from the Gear Guide's own lineup data
+# (opengolflab public/data/*-lineups.json) so community filter spellings stay
+# consistent; "Other" catches everything else and "" means not specified.
+EQUIPMENT_BRANDS = [
+    "", "Callaway", "Cleveland", "Cobra", "Honma", "Mizuno", "PING", "PXG",
+    "Srixon", "Sub70", "Takomo", "TaylorMade", "Titleist", "Tour Edge",
+    "Wilson", "XXIO", "Other",
+]
+EQUIPMENT_SLOTS = ("driver", "irons", "wedges")
+_EQUIP_MODEL_MAX = 32
+# Model names are free text ("Qi10 Max", "P·790" typed as P-790, "Stealth 2+").
+# Same philosophy as display names: a tight allowlist the server re-checks.
+_EQUIP_MODEL_RE = re.compile(r"^[A-Za-z0-9 .+/'-]+$")
+
+
+def normalize_equipment(raw: dict | None) -> dict:
+    """Clean a {slot: {brand, model}} mapping down to the valid, non-empty
+    entries. Unknown slots, unknown brands, and invalid models are dropped —
+    equipment is a nicety, never a reason to fail a contribution."""
+    out = {}
+    for slot in EQUIPMENT_SLOTS:
+        entry = (raw or {}).get(slot) or {}
+        brand = str(entry.get("brand") or "").strip()
+        model = " ".join(str(entry.get("model") or "").split())[:_EQUIP_MODEL_MAX]
+        if brand not in EQUIPMENT_BRANDS or not brand:
+            brand = ""
+        if model and not _EQUIP_MODEL_RE.match(model):
+            model = ""
+        if brand or model:
+            out[slot] = {"brand": brand, "model": model}
+    return out
 
 # ---------------------------------------------------------------------------
 # Launch-monitor / instrument metadata (manifest v1.1).
@@ -282,7 +325,8 @@ def record_consent(app_dir: str, accepted: bool) -> None:
 
 # ------------------------------------------------------- build the clean bundle
 def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monitor: str,
-             app_version: str, round_dp: int, session_ids=None, display_name: str = ""):
+             app_version: str, round_dp: int, session_ids=None, display_name: str = "",
+             age_band: str = "unknown", equipment: dict | None = None):
     """Return (manifest_dict, clean_shots_dataframe). Requires consent.
 
     ``session_ids`` (an iterable of session_id values) restricts the bundle to
@@ -355,9 +399,17 @@ def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monit
                 if "lm_connect_type" in df.columns else [],
             ),
         }},
-        "self_report": {"handicap_band": handicap_band if handicap_band in HANDICAP_BANDS else "unknown"},
+        "self_report": {
+            "handicap_band": handicap_band if handicap_band in HANDICAP_BANDS else "unknown",
+            # v1.4: banded, optional, self-declared — powers the site's age filter.
+            "age_band": age_band if age_band in AGE_BANDS else "unknown",
+        },
         "shot_count": int(len(out)),
     }
+    # v1.4: bag-level equipment, only if anything was actually specified.
+    equip = normalize_equipment(equipment)
+    if equip:
+        manifest["equipment"] = equip
 
     return manifest, out
 
@@ -405,12 +457,14 @@ def write_receipt_zip(manifest: dict, shots_csv: str, out_root: str) -> str:
 def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
                  handicap_band: str = "unknown", launch_monitor: str = "",
                  app_version: str = "", round_dp: int = 1, session_ids=None,
-                 display_name: str = "") -> str:
+                 display_name: str = "", age_band: str = "unknown",
+                 equipment: dict | None = None) -> str:
     """Write an anonymized bundle folder to ``out_root`` and return its path."""
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
                              launch_monitor=launch_monitor, app_version=app_version,
                              round_dp=round_dp, session_ids=session_ids,
-                             display_name=display_name)
+                             display_name=display_name, age_band=age_band,
+                             equipment=equipment)
     bundle_dir = os.path.join(out_root, f"{manifest['contributor_uuid'][:8]}_{manifest['created_date']}")
     os.makedirs(bundle_dir, exist_ok=True)
     with open(os.path.join(bundle_dir, "manifest.json"), "w") as f:
@@ -423,19 +477,22 @@ def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
 def build_zip(df: pd.DataFrame, out_root: str, *, app_dir: str,
               handicap_band: str = "unknown", launch_monitor: str = "",
               app_version: str = "", round_dp: int = 1, session_ids=None,
-              display_name: str = "") -> str:
+              display_name: str = "", age_band: str = "unknown",
+              equipment: dict | None = None) -> str:
     """Write a single self-contained .zip bundle into out_root; return its path."""
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
                              launch_monitor=launch_monitor, app_version=app_version,
                              round_dp=round_dp, session_ids=session_ids,
-                             display_name=display_name)
+                             display_name=display_name, age_band=age_band,
+                             equipment=equipment)
     return write_receipt_zip(manifest, _shots_csv(out), out_root)
 
 
 def send_bundle(df: pd.DataFrame, *, app_dir: str, url: str, key: str | None = None,
                 handicap_band: str = "unknown", launch_monitor: str = "",
                 app_version: str = "", round_dp: int = 1, timeout: int = 30,
-                session_ids=None, display_name: str = "") -> dict:
+                session_ids=None, display_name: str = "", age_band: str = "unknown",
+                equipment: dict | None = None) -> dict:
     """POST an anonymized bundle to the intake Worker.
 
     Returns the parsed reply, plus ``shot_count`` and — so the caller can offer
@@ -448,7 +505,8 @@ def send_bundle(df: pd.DataFrame, *, app_dir: str, url: str, key: str | None = N
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
                              launch_monitor=launch_monitor, app_version=app_version,
                              round_dp=round_dp, session_ids=session_ids,
-                             display_name=display_name)
+                             display_name=display_name, age_band=age_band,
+                             equipment=equipment)
     shots_csv = _shots_csv(out)
     payload = json.dumps({"manifest": manifest, "shots_csv": shots_csv}).encode("utf-8")
     headers = {

@@ -146,13 +146,15 @@ def summarize(shots):
     if not carry:
         return None
     ball = [s["ball_speed"] for s in shots if s.get("ball_speed") is not None]
+    clubspeed = [s["club_speed"] for s in shots if s.get("club_speed") is not None]
     launch = [s["launch_angle"] for s in shots if s.get("launch_angle") is not None]
     spin = [s["back_spin"] for s in shots if s.get("back_spin") is not None]
     offline = [s["offline"] for s in shots if s.get("offline") is not None]
     return {
         "n": len(carry),
         "carry_med": statistics.median(carry), "carry_mad": _mad(carry),
-        "ball_med": _med(ball), "launch_med": _med(launch), "spin_med": _med(spin),
+        "ball_med": _med(ball), "club_speed_med": _med(clubspeed),
+        "launch_med": _med(launch), "spin_med": _med(spin),
         "offline_med": _med(offline), "offline_mad": _mad(offline),
     }
 
@@ -214,6 +216,7 @@ def build_preview(shots_csv: str, manifest: dict) -> dict:
             "carry_median": _round(s["carry_med"]),
             "carry_spread_mad": _round(s["carry_mad"]),
             "ball_speed_median": _round(s["ball_med"]),
+            "club_speed_median": _round(s["club_speed_med"]),
             "launch_median": _round(s["launch_med"]),
             # Spin is aggregated but only ever *published* at Verified+ — see
             # AGGREGATION.md §4.4. Shown here with that caveat attached rather

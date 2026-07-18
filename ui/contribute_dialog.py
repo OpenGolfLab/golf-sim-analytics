@@ -226,6 +226,71 @@ def build_contribute_body(card, close, configured_name: str | None = None):
         wraplength=420, justify="left", anchor="w",
     ).pack(anchor="w", pady=(0, 12))
 
+    # ---- optional age band (v1.4) ----
+    # Banded on purpose (never an exact age next to a public name), defaulting
+    # to "Prefer not to say". Persisted: age doesn't change per contribution.
+    from data import settings as settings_mod
+    _AGE_LABELS = {"unknown": "Prefer not to say"}
+    _age_display = [_AGE_LABELS.get(b, b) for b in contribute.AGE_BANDS]
+
+    def _age_to_band(display: str) -> str:
+        return next((b for b in contribute.AGE_BANDS
+                     if _AGE_LABELS.get(b, b) == display), "unknown")
+
+    saved_band = settings_mod.get("age_band")
+    theme.section_label(card, "Your age (optional)", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
+    age_var = tk.StringVar(value=_AGE_LABELS.get(saved_band, saved_band)
+                           if saved_band in contribute.AGE_BANDS else "Prefer not to say")
+    age_var.trace_add("write", lambda *_a: settings_mod.set("age_band", _age_to_band(age_var.get())))
+    theme.dropdown(card, _age_display, age_var, width=200).pack(anchor="w", pady=(0, 10))
+
+    # ---- optional bag (v1.4): driver / irons / wedges, brand + model ----
+    # Powers the site's equipment filters. Persisted for the same reason as age:
+    # a bag changes rarely, a contribution happens often. Leaving everything
+    # blank is a first-class choice — the filters have a "Not specified" bucket.
+    theme.section_label(card, "Your bag (optional)", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
+    theme.body_label(
+        card, "Helps other golfers filter community data by gear. Leave blank "
+        "to skip — shots still count either way.",
+        color=Colors.TEXT_MUTED, font=theme.font("caption"),
+        wraplength=420, justify="left", anchor="w",
+    ).pack(anchor="w", pady=(0, 4))
+
+    saved_equip = settings_mod.get("equipment") or {}
+    bag = ctk.CTkFrame(card, fg_color="transparent")
+    bag.pack(fill="x", pady=(0, 12))
+    equip_vars: dict[str, tuple[tk.StringVar, tk.StringVar]] = {}
+
+    def _persist_equipment(*_a):
+        settings_mod.set("equipment", {
+            slot: {"brand": bvar.get().strip(), "model": mvar.get().strip()}
+            for slot, (bvar, mvar) in equip_vars.items()
+            if bvar.get().strip() or mvar.get().strip()
+        })
+
+    for row, (slot, label) in enumerate((("driver", "Driver"), ("irons", "Irons"),
+                                         ("wedges", "Wedges"))):
+        prev = saved_equip.get(slot) or {}
+        bvar = tk.StringVar(value=prev.get("brand", ""))
+        mvar = tk.StringVar(value=prev.get("model", ""))
+        equip_vars[slot] = (bvar, mvar)
+        theme.body_label(bag, label, color=Colors.TEXT_PRIMARY).grid(
+            row=row, column=0, sticky="w", padx=(0, 8), pady=3)
+        theme.dropdown(bag, list(contribute.EQUIPMENT_BRANDS), bvar, width=130).grid(
+            row=row, column=1, padx=(0, 6), pady=3)
+        entry = ctk.CTkEntry(bag, textvariable=mvar, width=170,
+                             height=theme.CONTROL_HEIGHT, corner_radius=theme.CONTROL_RADIUS,
+                             font=theme.font("body"), fg_color="transparent",
+                             border_color=Colors.BORDER, border_width=1,
+                             placeholder_text="Model")
+        entry.grid(row=row, column=2, pady=3, sticky="w")
+        bvar.trace_add("write", _persist_equipment)
+        mvar.trace_add("write", _persist_equipment)
+
+    def _current_equipment() -> dict:
+        return {slot: {"brand": bvar.get().strip(), "model": mvar.get().strip()}
+                for slot, (bvar, mvar) in equip_vars.items()}
+
     # ---- status line ----
     status = theme.body_label(card, "", color=Colors.TEXT_MUTED, font=theme.font("caption"),
                               wraplength=420, justify="left", anchor="w")
@@ -264,6 +329,8 @@ def build_contribute_body(card, close, configured_name: str | None = None):
                 launch_monitor=monitor_var.get(),
                 app_version=getattr(config, "APP_VERSION", ""),
                 session_ids=chosen, display_name=configured_name,
+                age_band=_age_to_band(age_var.get()),
+                equipment=_current_equipment(),
             )
         except Exception as exc:  # noqa: BLE001
             _set_status(f"Couldn't save: {exc}", Colors.WARNING)
@@ -297,6 +364,8 @@ def build_contribute_body(card, close, configured_name: str | None = None):
                 launch_monitor=monitor_var.get(),
                 app_version=getattr(config, "APP_VERSION", ""),
                 session_ids=chosen, display_name=configured_name,
+                age_band=_age_to_band(age_var.get()),
+                equipment=_current_equipment(),
             )
         except Exception as exc:  # noqa: BLE001
             _set_status(f"Upload failed: {exc}", Colors.WARNING)
