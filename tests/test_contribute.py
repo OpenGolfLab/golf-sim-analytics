@@ -108,8 +108,8 @@ def test_manifest_always_carries_a_name(tmp_path):
     assert manifest2["display_name"] == "Chosen Name"
 
 
-def test_schema_version_is_1_3():
-    assert contribute.SCHEMA_VERSION == "1.3"
+def test_schema_version_is_1_4():
+    assert contribute.SCHEMA_VERSION == "1.4"
 
 
 # ------------------------------------------------------------------- receipt
@@ -128,3 +128,52 @@ def test_receipt_zip_is_byte_identical_to_what_prepare_built(tmp_path):
         assert z.read("shots.csv").decode("utf-8") == shots_csv
         got_manifest = z.read("manifest.json").decode("utf-8")
     assert got_manifest == contribute._manifest_bytes(manifest)
+
+
+# ---------------------------------------------------------- v1.4: age + gear
+def test_normalize_equipment_keeps_valid_drops_invalid():
+    import contribute
+    out = contribute.normalize_equipment({
+        "driver": {"brand": "TaylorMade", "model": "Qi10 Max"},
+        "irons": {"brand": "NotABrand", "model": "P790"},   # brand dropped
+        "wedges": {"brand": "Cleveland", "model": "<xss>"},  # model dropped
+        "putter": {"brand": "PING", "model": "Anser"},       # unknown slot
+    })
+    assert out["driver"] == {"brand": "TaylorMade", "model": "Qi10 Max"}
+    assert out["irons"] == {"brand": "", "model": "P790"}
+    assert out["wedges"] == {"brand": "Cleveland", "model": ""}
+    assert "putter" not in out
+    assert contribute.normalize_equipment(None) == {}
+    assert contribute.normalize_equipment({"driver": {"brand": "", "model": ""}}) == {}
+
+
+def test_manifest_v14_carries_age_and_equipment(tmp_path):
+    import contribute
+    contribute.record_consent(str(tmp_path), True)
+    manifest, _ = contribute._prepare(
+        _df(), app_dir=str(tmp_path), handicap_band="10-14",
+        launch_monitor="", app_version="t", round_dp=1,
+        age_band="40-49",
+        equipment={"driver": {"brand": "PING", "model": "G430"}})
+    assert manifest["schema_version"] == "1.4"
+    assert manifest["self_report"]["age_band"] == "40-49"
+    assert manifest["equipment"] == {"driver": {"brand": "PING", "model": "G430"}}
+
+
+def test_manifest_v14_defaults_omit_gear_and_use_unknown_age(tmp_path):
+    import contribute
+    contribute.record_consent(str(tmp_path), True)
+    manifest, _ = contribute._prepare(
+        _df(), app_dir=str(tmp_path), handicap_band="unknown",
+        launch_monitor="", app_version="t", round_dp=1)
+    assert manifest["self_report"]["age_band"] == "unknown"
+    assert "equipment" not in manifest
+
+
+def test_invalid_age_band_normalizes_to_unknown(tmp_path):
+    import contribute
+    contribute.record_consent(str(tmp_path), True)
+    manifest, _ = contribute._prepare(
+        _df(), app_dir=str(tmp_path), handicap_band="unknown",
+        launch_monitor="", app_version="t", round_dp=1, age_band="43")
+    assert manifest["self_report"]["age_band"] == "unknown"
