@@ -26,6 +26,8 @@ import urllib.request
 
 import pandas as pd
 
+import netutil
+
 log = logging.getLogger(__name__)
 
 # The published file is named this; the config URL points at the directory that
@@ -96,10 +98,14 @@ def fetch_community_shots(url: str | None, timeout: int = 20,
             "User-Agent": f"GolfSimAnalytics/{app_version or '1.0'} (+https://opengolflab.com)",
         },
     )
+    log.info("Community fetch: GET %s", endpoint)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        # ssl_context() verifies against a bundled CA file rather than the OS
+        # store — the OS-store load hangs in a frozen build (see netutil).
+        with urllib.request.urlopen(req, timeout=timeout,
+                                    context=netutil.ssl_context()) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, ValueError, TimeoutError) as exc:
+    except (urllib.error.URLError, ValueError, TimeoutError, OSError) as exc:
         log.info("Community fetch failed (%s) — showing empty state", exc)
         return pd.DataFrame()
 
@@ -146,4 +152,5 @@ def fetch_community_shots(url: str | None, timeout: int = 20,
     # are unaffected).
     if as_of:
         df.attrs["as_of"] = as_of
+    log.info("Community fetch: %d points loaded (as_of %s)", len(df), as_of)
     return df

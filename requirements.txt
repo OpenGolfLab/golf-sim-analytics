@@ -6,4 +6,5 @@ seaborn>=0.13
 pyarrow>=14
 customtkinter>=5.2
 pillow>=10
+certifi>=2024.0  # bundled CA certs so HTTPS works in the frozen exe (see netutil.py)
 tkinterdnd2>=0.4  # drag-and-drop CSV import (optional; app falls back if absent)

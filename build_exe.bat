@@ -20,7 +20,12 @@ echo Building executable (this can take a few minutes)...
 REM --collect-all tkinterdnd2 bundles its native tkdnd Tcl binaries so
 REM drag-and-drop CSV import works in the packaged exe (the app falls back
 REM to the file picker if they're ever missing, so this is belt-and-braces).
-python -m PyInstaller --noconsole --onefile --icon "assets\icon.ico" --add-data "assets;assets" --collect-all tkinterdnd2 --name "GolfSimAnalytics" app.py
+REM --collect-all certifi bundles certifi's cacert.pem data file — without it,
+REM the frozen exe verifies HTTPS against the Windows cert store, which HANGS in
+REM a packaged build (see netutil.py). --collect-submodules mplcursors covers the
+REM lazy `import mplcursors` inside the chart hover code that static analysis can
+REM miss.
+python -m PyInstaller --noconsole --onefile --icon "assets\icon.ico" --add-data "assets;assets" --collect-all tkinterdnd2 --collect-all certifi --collect-submodules mplcursors --name "GolfSimAnalytics" app.py
 if errorlevel 1 goto :fail
 
 REM Step 3: Ship everything the app looks for NEXT TO the exe, so the
