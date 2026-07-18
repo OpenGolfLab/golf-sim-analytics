@@ -108,8 +108,8 @@ def test_manifest_always_carries_a_name(tmp_path):
     assert manifest2["display_name"] == "Chosen Name"
 
 
-def test_schema_version_is_1_4():
-    assert contribute.SCHEMA_VERSION == "1.4"
+def test_schema_version_is_1_5():
+    assert contribute.SCHEMA_VERSION == "1.5"
 
 
 # ------------------------------------------------------------------- receipt
@@ -155,7 +155,7 @@ def test_manifest_v14_carries_age_and_equipment(tmp_path):
         launch_monitor="", app_version="t", round_dp=1,
         age_band="40-49",
         equipment={"driver": {"brand": "PING", "model": "G430"}})
-    assert manifest["schema_version"] == "1.4"
+    assert manifest["schema_version"] == "1.5"
     assert manifest["self_report"]["age_band"] == "40-49"
     assert manifest["equipment"] == {"driver": {"brand": "PING", "model": "G430"}}
 
@@ -177,3 +177,65 @@ def test_invalid_age_band_normalizes_to_unknown(tmp_path):
         _df(), app_dir=str(tmp_path), handicap_band="unknown",
         launch_monitor="", app_version="t", round_dp=1, age_band="43")
     assert manifest["self_report"]["age_band"] == "unknown"
+
+
+# ------------------------------------------------------- v1.5: provenance
+def test_manifest_carries_provenance_split(tmp_path):
+    import pandas as pd
+    contribute.record_consent(str(tmp_path), True)
+    df = _df()
+    # Half the shots from a live-tracked round, half imported.
+    n = len(df)
+    df = df.copy()
+    df["session_id"] = ["live-07-17-26-10-00-00"] * (n // 2) + ["s-imported"] * (n - n // 2)
+    manifest, out = contribute._prepare(
+        df, app_dir=str(tmp_path), handicap_band="unknown",
+        launch_monitor="", app_version="t", round_dp=1)
+    assert manifest["schema_version"] == "1.5"
+    prov = manifest["provenance"]
+    assert prov["live_tracked"] + prov["imported"] == len(out)
+    assert prov["live_tracked"] > 0 and prov["imported"] > 0
+
+
+def test_provenance_defaults_to_imported_without_session_ids(tmp_path):
+    contribute.record_consent(str(tmp_path), True)
+    manifest, out = contribute._prepare(
+        _df(), app_dir=str(tmp_path), handicap_band="unknown",
+        launch_monitor="", app_version="t", round_dp=1)
+    assert manifest["provenance"] == {"live_tracked": 0, "imported": len(out)}
+
+
+# ---------------------------------------------------- public-name check
+def _names_payload(payload):
+    import json as _json
+    from unittest import mock
+
+    class _Resp:
+        def read(self): return _json.dumps(payload).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    return mock.patch("urllib.request.urlopen", return_value=_Resp())
+
+
+def test_check_public_name_predicts_the_suffix(tmp_path):
+    mine = contribute.uuid_prefix(str(tmp_path))
+    with _names_payload({"names": {"tom": ["zzzz"]}}):  # another golfer's claim
+        name, collided = contribute.check_public_name(str(tmp_path), "Tom", "https://x.example")
+    assert collided and name == f"Tom-{mine}"
+
+
+def test_check_public_name_own_claim_is_not_a_collision(tmp_path):
+    mine = contribute.uuid_prefix(str(tmp_path))
+    with _names_payload({"names": {"tom": [mine]}}):    # that's us
+        name, collided = contribute.check_public_name(str(tmp_path), "Tom", "https://x.example")
+    assert not collided and name == "Tom"
+
+
+def test_check_public_name_survives_network_failure(tmp_path):
+    from unittest import mock
+    with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):
+        name, collided = contribute.check_public_name(str(tmp_path), "Tom", "https://x.example")
+    assert not collided and name == "Tom"
+    # Unconfigured URL: no network attempted at all.
+    name, collided = contribute.check_public_name(str(tmp_path), "Tom", "")
+    assert not collided and name == "Tom"

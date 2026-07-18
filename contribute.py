@@ -24,7 +24,7 @@ from data.columns import (
     DESCENT_ANGLE_ALIASES, SPIN_RATE_ALIASES, START_DIR_ALIASES, SPIN_AXIS_ALIASES,
 )
 
-SCHEMA_VERSION = "1.4"   # 1.1 = structured environment.instrument (see instrument_block)
+SCHEMA_VERSION = "1.5"   # 1.1 = structured environment.instrument (see instrument_block)
                          # 1.2 = + instrument.verification (claimed monitor vs
                          #       the connectType GSPro's own log reported)
                          # 1.3 = + display_name (the public name shown beside a
@@ -33,6 +33,10 @@ SCHEMA_VERSION = "1.4"   # 1.1 = structured environment.instrument (see instrume
                          #       {driver,irons,wedges}{brand,model} — all
                          #       optional, all self-declared, for the site's
                          #       community filters
+                         # 1.5 = + provenance {live_tracked, imported} shot
+                         #       counts (live rounds never exist as a
+                         #       user-editable CSV — a trust signal for
+                         #       showcase surfaces, never an acceptance gate)
 CONSENT_POLICY_VERSION = "1.0"
 HANDICAP_BANDS = ["scratch", "1-4", "5-9", "10-14", "15-19", "20-24", "25+", "unknown"]
 
@@ -310,6 +314,48 @@ def resolve_display_name(app_dir: str, configured: str = "") -> tuple[str, bool]
     return generated_display_name(get_contributor_uuid(app_dir)), True
 
 
+def uuid_prefix(app_dir: str) -> str:
+    """The 4-hex prefix of this machine's contributor uuid — the same value
+    the aggregator appends when disambiguating a collided display name."""
+    return get_contributor_uuid(app_dir).replace("-", "")[:4]
+
+
+def check_public_name(app_dir: str, configured: str, url: str,
+                      timeout: int = 6) -> tuple[str, bool]:
+    """Best-effort answer to "what will my name actually look like on the site?"
+
+    Fetches the public claimed-name index (names.json, published by the
+    aggregator) and applies the SAME disambiguation rule the aggregator uses:
+    if another contributor already claims this name, ours gets a stable
+    "-<uuid4hex>" suffix. Because the suffix comes from our own uuid, the app
+    can predict it exactly — no server round-trip at aggregation time, no
+    registration step.
+
+    Returns (public_name, collided). On any network/parse failure it returns
+    the locally-resolved name with collided=False: the check is a courtesy,
+    never a gate, and the suffix rule self-corrects on the site regardless.
+    """
+    name, _generated = resolve_display_name(app_dir, configured)
+    if not url or not str(url).startswith("https://"):
+        return name, False
+    try:
+        import netutil
+        req = urllib.request.Request(
+            str(url).rstrip("/") + "/names.json",
+            headers={"Accept": "application/json",
+                     "User-Agent": "GolfSimAnalytics (+https://opengolflab.com)"})
+        with urllib.request.urlopen(req, timeout=timeout,
+                                    context=netutil.ssl_context()) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        holders = (data.get("names") or {}).get(name.lower(), [])
+    except Exception:
+        return name, False
+    mine = uuid_prefix(app_dir)
+    if any(h != mine for h in holders):
+        return f"{name}-{mine}", True
+    return name, False
+
+
 def has_consent(app_dir: str) -> bool:
     return os.path.exists(os.path.join(app_dir, ".contribute_consent"))
 
@@ -410,6 +456,18 @@ def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monit
     equip = normalize_equipment(equipment)
     if equip:
         manifest["equipment"] = equip
+
+    # v1.5: provenance. Live-tracked rounds are archived app-internally (their
+    # session ids carry the "live-" prefix from live/shot_data) and never exist
+    # as a user-editable CSV; everything else arrived as an import. Counted
+    # over the shots actually contributed, after all filtering above.
+    if "session_id" in df.columns:
+        live_mask = df["session_id"].astype(str).str.startswith("live-")
+        live_n = int(live_mask.sum())
+        manifest["provenance"] = {"live_tracked": live_n,
+                                  "imported": int(len(df) - live_n)}
+    else:
+        manifest["provenance"] = {"live_tracked": 0, "imported": int(len(df))}
 
     return manifest, out
 

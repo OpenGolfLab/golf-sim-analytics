@@ -1548,8 +1548,43 @@ class SimAnalyticsApp:
         # overrideredirect popup. These bindings only refresh the inline status
         # text, and they die with the widget, so nothing stacks across opens.
         entry.bind("<KeyRelease>", lambda _e: _refresh(), add="+")
-        entry.bind("<FocusOut>", lambda _e: _refresh(), add="+")
+        entry.bind("<FocusOut>", lambda _e: (_refresh(), _check_taken()), add="+")
         _refresh()
+
+        def _check_taken():
+            """One-shot uniqueness check when the user finishes typing: if the
+            name is already claimed by another golfer, say so HERE, at naming
+            time — with the exact suffixed name the site would show — rather
+            than surprising them after an upload. Network is best-effort and
+            off-thread; silence on failure (the suffix rule still self-corrects
+            site-side)."""
+            raw = self.settings_display_name.get()
+            if contribute.normalize_display_name(raw) is None:
+                return  # invalid/blank: the validation message already covers it
+
+            def _work():
+                resolved, collided = contribute.check_public_name(
+                    str(config.BASE_DIR), raw,
+                    getattr(config, "OPENGOLFLAB_COMMUNITY_URL", ""))
+                if not collided:
+                    return
+
+                def _apply():
+                    if status.winfo_exists():
+                        status.configure(
+                            text=f"“{contribute.normalize_display_name(raw)}” is "
+                                 f"already used by another golfer — your data will "
+                                 f"appear as “{resolved}”. Pick another name to get "
+                                 "one that's all yours.",
+                            text_color=Colors.WARNING)
+                try:
+                    status.after(0, _apply)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_work, daemon=True).start()
+
+        _check_taken()
 
         theme.body_label(
             card, "Shown publicly next to the data you contribute. Everything "

@@ -124,15 +124,55 @@ def build_contribute_body(card, close, configured_name: str | None = None):
     active_name, was_generated = contribute.resolve_display_name(app_dir, configured_name)
 
     theme.section_label(card, "Contributing as", color=Colors.SUCCESS).pack(anchor="w", pady=(2, 2))
-    theme.body_label(card, active_name, color=Colors.TEXT_ACTIVE,
-                     font=theme.font("subheading", "bold")).pack(anchor="w")
+    name_label = theme.body_label(card, active_name, color=Colors.TEXT_ACTIVE,
+                                  font=theme.font("subheading", "bold"))
+    name_label.pack(anchor="w")
     if was_generated:
         who_note = ("A name was generated for you. Set your own in "
                     "Settings → Display name — it's shown publicly on opengolflab.org.")
     else:
         who_note = "Shown publicly next to your data on opengolflab.org."
-    theme.body_label(card, who_note, color=Colors.TEXT_MUTED, font=theme.font("caption"),
-                     wraplength=420, justify="left", anchor="w").pack(anchor="w", pady=(2, 10))
+    who_label = theme.body_label(card, who_note, color=Colors.TEXT_MUTED, font=theme.font("caption"),
+                                 wraplength=420, justify="left", anchor="w")
+    who_label.pack(anchor="w", pady=(2, 10))
+
+    # Uniqueness check, off-thread (a network call must never freeze the panel):
+    # if another golfer already claims this name, show the exact suffixed name
+    # the site will publish — BEFORE the user sends anything, so the name they
+    # see here is the name they'll find on opengolflab.org.
+    def _name_check():
+        import threading
+
+        def _work():
+            resolved, collided = contribute.check_public_name(
+                app_dir, configured_name or "",
+                getattr(config, "OPENGOLFLAB_COMMUNITY_URL", ""))
+            if not collided:
+                return
+
+            def _apply():
+                if not name_label.winfo_exists():
+                    return
+                name_label.configure(text=resolved)
+                who_label.configure(
+                    text=f"“{active_name}” is already used by another golfer, so "
+                         f"your data appears as “{resolved}”. Pick a different name "
+                         "in Settings if you'd rather.",
+                    text_color=Colors.WARNING)
+            try:
+                name_label.after(0, _apply)
+            except Exception:
+                pass  # panel closed mid-check
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    _name_check()
+    # The resolved name for the post-send message: updated by the check above.
+    def _current_public_name():
+        try:
+            return name_label.cget("text")
+        except Exception:
+            return active_name
 
     theme.divider(card).pack(fill="x", pady=12)
 
@@ -374,7 +414,7 @@ def build_contribute_body(card, close, configured_name: str | None = None):
         sent_payload["manifest"] = res.get("manifest")
         sent_payload["shots_csv"] = res.get("shots_csv")
         _set_status(
-            f"Sent {n} shots to OpenGolfLab as “{active_name}” — thank you for "
+            f"Sent {n} shots to OpenGolfLab as “{_current_public_name()}” — thank you for "
             "contributing!\nUse the buttons below to save a receipt of exactly "
             "what was sent, and what the site will show for you.",
             Colors.SUCCESS)
