@@ -3,7 +3,9 @@ import math
 
 import pandas as pd
 
-from live.shot_data import archive_round, flatten_shot, round_type_for
+from live.shot_data import (
+    archive_round, flatten_shot, heal_missing_holeshot, round_type_for,
+)
 
 SAMPLE_SHOT = {
     "ShotID": "f3fe6977-a3c0-452d-bca9-d63a91edb477",
@@ -11,6 +13,8 @@ SAMPLE_SHOT = {
     "PlayerName": "Practice",
     "Hole": 0,
     "HolePar": 4,
+    "HoleShot": 1,
+    "ShotResult": 0,
     "DistanceToPin": 392.000031,
     "TotalDistance": 80.56164,
     "ClubIndex": 24,
@@ -40,6 +44,10 @@ def test_flatten_shot_maps_core_fields():
     assert flat["club_index"] == 24
     # ClubIndex 24 is this bag's Sand Wedge (config.CLUB_INDEX_MAP).
     assert flat["club"] == "Sw"
+    # GSPro's stroke numbering — the scorecard's stroke source (mulligans
+    # repeat a HoleShot, so records-per-hole overcounts; see data/on_course).
+    assert flat["holeshot"] == 1
+    assert flat["shot_result"] == 0
 
 
 def test_flatten_shot_derives_offline_from_carry_and_azimuth():
@@ -163,6 +171,47 @@ def test_archive_round_on_course_never_touches_the_club_lookup(tmp_path):
     assert info["round_type"] == "on_course"
     df = pd.read_parquet(info["parquet_path"])
     assert "clubspeed" not in df.columns  # nothing enriched, same as before
+
+
+def test_heal_missing_holeshot_backfills_from_raw_json(tmp_path):
+    """On-course Parquet archived before the holeshot column existed gains
+    holeshot/shot_result from its raw JSON snapshot, joined by ShotID —
+    everything else in the file untouched."""
+    data_dir = tmp_path / "parquet_data"
+    raw_dir = tmp_path / "live_rounds_raw"
+    data_dir.mkdir()
+    raw_dir.mkdir()
+
+    shots = [
+        {**SAMPLE_SHOT, "RoundID": 42, "ShotID": "a", "HoleShot": 1},
+        {**SAMPLE_SHOT, "RoundID": 42, "ShotID": "b", "HoleShot": 1},  # mulligan re-hit
+        {**SAMPLE_SHOT, "RoundID": 42, "ShotID": "c", "HoleShot": 2, "ShotResult": 2},
+    ]
+    info = archive_round(shots, data_dir, raw_dir)
+    # Simulate the pre-holeshot schema by stripping the new columns.
+    df = pd.read_parquet(info["parquet_path"])
+    df.drop(columns=["holeshot", "shot_result"]).to_parquet(
+        info["parquet_path"], engine="pyarrow", index=False)
+
+    assert heal_missing_holeshot(data_dir, raw_dir) == 1
+
+    healed = pd.read_parquet(info["parquet_path"])
+    assert list(healed["holeshot"]) == [1, 1, 2]
+    assert list(healed["shot_result"]) == [0, 0, 2]
+    assert list(healed["club"]) == list(df["club"])  # rest of the file intact
+
+    # Second run finds nothing to do — the column is there now.
+    assert heal_missing_holeshot(data_dir, raw_dir) == 0
+
+
+def test_heal_missing_holeshot_skips_files_without_raw_snapshot(tmp_path):
+    data_dir = tmp_path / "parquet_data"
+    raw_dir = tmp_path / "live_rounds_raw"
+    data_dir.mkdir()
+    raw_dir.mkdir()
+    pd.DataFrame({"shot_id": ["a"], "club": ["Dr"]}).to_parquet(
+        data_dir / "live-01-01-26-00-00-00-on_course.parquet", index=False)
+    assert heal_missing_holeshot(data_dir, raw_dir) == 0
 
 
 def test_archive_round_session_id_embeds_a_parseable_date(tmp_path):

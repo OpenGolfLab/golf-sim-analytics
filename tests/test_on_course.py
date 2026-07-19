@@ -56,6 +56,19 @@ def test_exclude_putts_noop_without_club_column():
     assert len(on_course.exclude_putts(df)) == 2
 
 
+def test_exclude_putts_drops_penalty_stroke_records():
+    # A water drop writes its own record (shot_result == 2) with ball data
+    # cloned from the hazard ball — a scorecard stroke, not a swing. Left in,
+    # it would double the hazard shot in every dispersion view.
+    df = pd.DataFrame({
+        "club": ["Dr", "Lw", "Lw", "Putter"],
+        "shot_result": [0, 0, 2, 0],
+    })
+    out = on_course.exclude_putts(df)
+    assert list(out["club"]) == ["Dr", "Lw"]
+    assert (out["shot_result"] != 2).all()
+
+
 def test_scorecard_counts_putts_as_strokes():
     # A par-4 played driver, wedge, then two putts = 4 strokes. The putts MUST
     # count (that's why exclude_putts is not applied to the scorecard's source).
@@ -99,6 +112,49 @@ def test_hole_summary_strokes_par_and_completion():
     assert hs.loc[1, "strokes"] == 4 and hs.loc[1, "par"] == 4
     assert bool(hs.loc[1, "holed"]) is True and hs.loc[1, "to_par"] == 0
     assert bool(hs.loc[2, "holed"]) is False
+
+
+def test_hole_summary_scores_by_holeshot_not_record_count():
+    # Mulligans: GSPro keeps the superseded record and the re-hit repeats the
+    # same HoleShot. Real case (2026-07-19 Highlands round, hole 18): 7 records
+    # but stroke numbers 1,1,1,1,2,3,4 — three re-teed drives. GSPro scored 4;
+    # counting records said 7.
+    df = _hole("r1", 17, 5, [320, 281, 333, 260, 47, 2.2, 0])
+    df["holeshot"] = [1, 1, 1, 1, 2, 3, 4]
+    hs = on_course.hole_summary(df).set_index("hole")
+    assert int(hs.loc[17, "strokes"]) == 4
+
+
+def test_hole_summary_holeshot_rescues_undercounted_holes():
+    # The reverse failure also exists in real archives: a file kept only the
+    # final record of a hole (1 record, HoleShot 6) — record count says 1,
+    # GSPro's stroke numbering says 6.
+    df = _hole("r1", 0, 5, [0.0])
+    df["holeshot"] = [6]
+    hs = on_course.hole_summary(df).set_index("hole")
+    assert int(hs.loc[0, "strokes"]) == 6
+
+
+def test_hole_summary_falls_back_to_record_count_without_holeshot_values():
+    # Rounds archived before the holeshot column existed load with NaN there
+    # (or no column at all) and must keep the old records-per-hole behavior.
+    with_nan = _hole("old", 1, 4, [410, 150, 20, 0])
+    with_nan["holeshot"] = float("nan")
+    hs = on_course.hole_summary(with_nan).set_index("hole")
+    assert int(hs.loc[1, "strokes"]) == 4
+
+
+def test_hole_summary_mixed_old_and_new_sessions():
+    # One healed/new round with real stroke numbers alongside one legacy round
+    # without them — each scores by its own rule in a single frame.
+    new = _hole("new", 1, 4, [410, 150, 150, 20, 0])   # mulligan on stroke 2
+    new["holeshot"] = [1, 2, 2, 3, 4]
+    old = _hole("old", 1, 4, [400, 8, 0])
+    old["holeshot"] = float("nan")
+    hs = on_course.hole_summary(pd.concat([new, old], ignore_index=True))
+    by_sid = hs.set_index("session_id")["strokes"]
+    assert int(by_sid["new"]) == 4
+    assert int(by_sid["old"]) == 3
 
 
 def test_round_summary_excludes_incomplete_holes_and_counts_buckets():

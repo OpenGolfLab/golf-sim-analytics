@@ -92,6 +92,15 @@ def flatten_shot(raw_shot: dict, club_lookup=None) -> dict:
         "backspin": backspin,
         "hole": raw_shot.get("Hole"),
         "holepar": raw_shot.get("HolePar"),
+        # GSPro's own stroke number within the hole — the authoritative score
+        # source. Mulligans re-hit the SAME HoleShot (the superseded record
+        # stays in the file), so records-per-hole overcounts every mulligan;
+        # max(holeshot) matches GSPro's scorecard. Penalty strokes get their
+        # own record (holeshot advances) with shot_result == 2 and ball data
+        # cloned from the hazard ball — countable for score, but not a swing
+        # (see data.on_course.exclude_putts).
+        "holeshot": raw_shot.get("HoleShot"),
+        "shot_result": raw_shot.get("ShotResult"),
         "distancetopin": raw_shot.get("DistanceToPin"),
         "shot_id": raw_shot.get("ShotID"),
         # GSPro's internal course slug for on-course rounds (e.g.
@@ -112,6 +121,48 @@ def flatten_shot(raw_shot: dict, club_lookup=None) -> dict:
             flat["club_index"] = None
         flat.update(extra)
     return flat
+
+
+def heal_missing_holeshot(data_dir: Path, raw_archive_dir: Path) -> int:
+    """One-time startup repair: backfill holeshot / shot_result onto on-course
+    Parquet archives written before those columns existed.
+
+    Every live-archived round keeps a raw JSON snapshot alongside its Parquet
+    (see archive_round), so the missing columns can be joined back in by
+    ShotID without touching anything else in the file. Only on-course
+    archives need it (practice ranges have no scorecard), and files that
+    already carry the column are skipped, so reruns are free. Returns how
+    many files were repaired.
+    """
+    healed = 0
+    for pq_path in data_dir.glob("live-*-on_course.parquet"):
+        raw_path = raw_archive_dir / f"{pq_path.stem}.json"
+        if not raw_path.exists():
+            continue
+        try:
+            df = pd.read_parquet(pq_path)
+        except Exception:
+            log.exception("heal_missing_holeshot: unreadable %s — skipping", pq_path)
+            continue
+        if "holeshot" in df.columns or "shot_id" not in df.columns:
+            continue
+        try:
+            raw_shots = json.loads(raw_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            log.exception("heal_missing_holeshot: unreadable %s — skipping", raw_path)
+            continue
+        by_id = {s.get("ShotID"): s for s in raw_shots}
+        df["holeshot"] = df["shot_id"].map(lambda i: by_id.get(i, {}).get("HoleShot"))
+        df["shot_result"] = df["shot_id"].map(lambda i: by_id.get(i, {}).get("ShotResult"))
+        try:
+            df.to_parquet(pq_path, engine="pyarrow", index=False)
+        except Exception:
+            log.exception("heal_missing_holeshot: could not rewrite %s", pq_path)
+            continue
+        healed += 1
+    if healed:
+        log.info("heal_missing_holeshot: backfilled %d on-course archive(s)", healed)
+    return healed
 
 
 def round_type_for(raw_shots: list[dict]) -> str:
