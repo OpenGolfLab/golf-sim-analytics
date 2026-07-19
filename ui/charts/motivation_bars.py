@@ -71,9 +71,11 @@ def draw_speed_bar(ax, value, record, font_scale: float) -> None:
     color = _OVER_RECORD if over else _SPEED_CMAP(frac)
     ax.bar(0, value, width=_BAR_WIDTH, color=color, edgecolor="black", linewidth=0.6, zorder=2)
 
-    # Record (PB) marker line across the track.
+    # Record (PB) marker line across the track. Label sits left of the bar
+    # (bar spans ±0.25) so it can't clip into the neighboring axis now that
+    # the gauges share the bottom-right corner at half height.
     ax.axhline(record, color=Colors.TEXT_ACTIVE, linestyle="--", linewidth=1.3, zorder=3)
-    ax.text(0.42, record, "PB", ha="left", va="center", color=Colors.TEXT_ACTIVE,
+    ax.text(-0.55, record, "PB", ha="left", va="bottom", color=Colors.TEXT_ACTIVE,
             fontsize=max(8, font_scale - 3))
 
     if over:
@@ -91,7 +93,9 @@ def draw_speed_bar(ax, value, record, font_scale: float) -> None:
 def draw_quality_bar(ax, value, font_scale: float) -> None:
     """Shot-quality gauge, 0-100. `value` = latest shot's score (or None)."""
     _prime_axis(ax, top=100.0, title="Shot\nQuality", font_scale=font_scale)
-    ax.set_yticks([0, 25, 50, 75, 100])
+    # Sparse ticks: the gauges run at half the panel height now that the
+    # session-trends card sits above them, and five labels get cramped.
+    ax.set_yticks([0, 50, 100])
 
     if value is None or (isinstance(value, float) and np.isnan(value)):
         ax.text(0, 50, "no\nscore\nyet", ha="center", va="center",
