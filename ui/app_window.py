@@ -59,6 +59,7 @@ from data.store import (
 )
 from live.gspro_db import ClubDataLookup
 from live.round_watcher import LiveRoundWatcher
+from live.shot_data import heal_missing_holeshot
 from ui import theme
 from ui.club_config_dialog import open_club_config_dialog
 from ui.manage_sessions_dialog import build_manage_sessions_body
@@ -203,6 +204,14 @@ class SimAnalyticsApp:
         self._community_as_of = None
         self._community_status = "offline"  # offline | loading | empty | ok
         self._community_loading = False
+        # One-time archive repair: on-course rounds archived before the
+        # holeshot column existed backfill it from their raw JSON snapshots,
+        # so old scorecards get GSPro's real stroke counts too (mulligans
+        # used to inflate them — see data/on_course.py's scoring notes).
+        try:
+            heal_missing_holeshot(config.DATA_DIR, config.LIVE_ROUNDS_RAW_DIR)
+        except Exception:
+            log.exception("On-course archive repair failed — continuing without it")
         self._build_round_watcher()
 
         self.global_time_var = tk.StringVar(value=filters_mod.TIME_ALL)

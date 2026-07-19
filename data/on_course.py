@@ -8,9 +8,12 @@ already tags every shot "practice" vs "on_course" (see live/shot_data.py), so
 splitting them is just a filter. ``practice_view`` / ``on_course_view`` are the
 two halves.
 
-Mulligans (re-hit shots) are intentionally NOT filtered here: GSPro already
-handles re-hits on its own scorecard, so stripping them again would
-double-count the correction.
+Mulligans: GSPro keeps the superseded record in currentRound.dat when a shot
+is re-hit — the replacement record repeats the same HoleShot stroke number.
+Scoring therefore uses max(holeshot) per hole (GSPro's own stroke numbering),
+never records-per-hole, which would count every mulligan as an extra stroke.
+The superseded records themselves stay in the shot data: they're real swings
+the golfer made, so the on-course swing views still show them.
 """
 from __future__ import annotations
 
@@ -49,26 +52,40 @@ def on_course_view(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def exclude_putts(df: pd.DataFrame) -> pd.DataFrame:
-    """Drop putter strokes (club == "Putter") from a frame.
+    """Drop non-swing records — putter strokes and penalty-stroke records —
+    from a frame.
 
     Putts are kept in the stored data so the scorecard can count strokes, but
     they are not launch-monitor shots — their ball data is copied from the
-    preceding shot (see config.CLUB_INDEX_MAP's note on ClubIndex 26) — so
-    every swing-analytics view and the contribution export drop them here. No-op
-    when there's no club column."""
+    preceding shot (see config.CLUB_INDEX_MAP's note on ClubIndex 26).
+    Penalty strokes (shot_result == 2, e.g. a water drop) likewise get their
+    own record with ball data cloned from the hazard ball — a stroke on the
+    scorecard, but not a swing, and left in they'd double the hazard shot in
+    every dispersion/carry view. Both are dropped here by every
+    swing-analytics view and the contribution export. No-op columns that are
+    absent are simply not filtered on."""
     from config import NON_SWING_CLUBS
-    if df.empty or "club" not in df.columns:
+    if df.empty:
         return df
-    return df[~df["club"].astype(str).str.strip().isin(NON_SWING_CLUBS)]
+    out = df
+    if "club" in out.columns:
+        out = out[~out["club"].astype(str).str.strip().isin(NON_SWING_CLUBS)]
+    if "shot_result" in out.columns:
+        out = out[pd.to_numeric(out["shot_result"], errors="coerce").fillna(0) != 2]
+    return out
 
 
 # ---------------------------------------------------------------------------
 # Scoring — turn the shot stream into per-hole and per-round scorecards.
 #
-# There's no explicit stroke count in the data, so strokes-per-hole is the
-# number of shots logged on that hole (GSPro logs every stroke, putts included,
-# and already resolves re-hits on its own scorecard — see the module docstring
-# on why mulligans aren't filtered here).
+# Strokes-per-hole comes from GSPro's own stroke numbering: every record
+# carries a HoleShot ("stroke N of this hole"), and the highest one on a hole
+# is the score GSPro's scorecard shows. Counting records instead gets it
+# wrong in both directions — mulligans leave superseded records behind
+# (same HoleShot repeated → overcount), and some rounds' files keep only the
+# final record per stroke number (→ undercount). Rows archived before the
+# holeshot column existed fall back to the record count (see the module
+# docstring on mulligans).
 # ---------------------------------------------------------------------------
 _HOLE_COLS = {"session_id", "hole", "holepar"}
 
@@ -113,6 +130,12 @@ def hole_summary(df: pd.DataFrame) -> pd.DataFrame:
 
     grp = oc.groupby(["session_id", "hole"], sort=False)
     strokes = grp.size().rename("strokes")
+    if "holeshot" in oc.columns:
+        # GSPro's own stroke numbering (see the Scoring header above). Holes
+        # whose rows predate the holeshot column keep the record-count value.
+        hs_max = (pd.to_numeric(oc["holeshot"], errors="coerce")
+                  .groupby([oc["session_id"], oc["hole"]], sort=False).max())
+        strokes = hs_max.where(hs_max > 0, strokes).astype(int).rename("strokes")
     par = pd.to_numeric(grp["holepar"].first(), errors="coerce").rename("par")
     if "distancetopin" in oc.columns:
         min_dtp = (pd.to_numeric(oc["distancetopin"], errors="coerce")
