@@ -71,7 +71,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; Pulls in everything build_exe.bat staged next to the exe -- the exe
 ; itself, the course photo, and both sample datasets -- so the installed
 ; app looks exactly like running "python app.py" from the source repo.
-Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Excludes are belt-and-braces on top of build_exe.bat's dist\ clean: the
+; app stores user data (raw_csvs\, parquet_data\, logs\, settings.json)
+; next to the exe, so if dist\ is ever dirty from a test run, packaging
+; those paths would overwrite every user's settings and inject the
+; developer's sessions into their data on upgrade. Never ship them.
+Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "raw_csvs\*,parquet_data\*,logs\*,settings.json"
 
 [Icons]
 ; No Tasks page to opt into these (it was the last remaining wizard

@@ -9,6 +9,14 @@ REM python itself is.
 python --version >nul 2>&1
 if errorlevel 1 goto :nopython
 
+REM Step 0: Clean dist\ so a fresh build never packages leftovers from a
+REM previous run. Critical because the app writes its data (raw_csvs\,
+REM parquet_data\, logs\, settings.json) NEXT TO the exe - running the exe
+REM from dist\ during testing plants your personal data there, and the
+REM installer ships everything in dist\ to every user, overwriting their
+REM settings and mixing your sessions into theirs on upgrade.
+if exist "dist" rmdir /s /q "dist"
+
 REM Step 1: Dependencies (PyInstaller is build-only, not in requirements.txt)
 python -m pip install -r requirements.txt
 if errorlevel 1 goto :fail
