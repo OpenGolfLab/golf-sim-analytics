@@ -2393,6 +2393,10 @@ class SimAnalyticsApp:
             entry["record_club_speed"] = self._record_club_speed
             entry["latest_quality"] = self._live_shot_quality(
                 self.live_shot_buffer[-1] if self.live_shot_buffer else None)
+            # ...and the session-trends card: baselines for the active club
+            # come from the whole practice history, deliberately ignoring the
+            # global Club/Time filters (see live_dispersion.render).
+            entry["trend_history"] = self.master_df
 
         fig = entry["fig"]
 

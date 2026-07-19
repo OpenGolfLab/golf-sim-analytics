@@ -19,7 +19,7 @@ from matplotlib.lines import Line2D
 from config import Colors, get_club_color, get_club_rank
 from data import units as units_mod
 from data.columns import CARRY_ALIASES, OFFLINE_ALIASES, find_col
-from ui.charts import motivation_bars
+from ui.charts import live_trends, motivation_bars
 from ui.charts._shared import (
     attach_hover_tooltip, club_legend, diagnostic_cols, diagnostic_lines, style_axes,
 )
@@ -53,20 +53,25 @@ def _draw_motivation_bars(ax_speed, ax_quality, live_shots, config, font_scale):
 
 
 def render(fig, df, club_colors, font_scale, config, **extra):
-    # Main dispersion scatter on the left, two narrow motivation gauges on the
-    # right (club speed vs. PB, and shot quality) — see motivation_bars. A
-    # flat 4-column gridspec (scatter | spacer | speed | quality) with a
-    # uniform wspace, where the unused spacer column supplies the extra gap
-    # that sets the scatter off from the gauges, so the two gauges themselves
-    # sit close together as a pair. (A nested subgridspec was tried for this
-    # but collapses to zero-width axes in very small/compact panels.)
+    # Main dispersion scatter on the left; the right side stacks the
+    # active-club session-trends card (top) over the two motivation gauges
+    # (bottom, at roughly half the panel height) — see live_trends and
+    # motivation_bars. A flat 2x4 gridspec (scatter | spacer | speed |
+    # quality) with a uniform wspace: the scatter spans both rows of column
+    # 0, the trends card spans columns 2-3 of the top row, and the unused
+    # spacer column supplies the extra gap that sets the scatter off from
+    # the right stack. (A nested subgridspec was tried for this but
+    # collapses to zero-width axes in very small/compact panels.)
     unit = extra.get("units", units_mod.YARDS)
+    raw_history_df = df
     df = units_mod.to_display_frame(df, unit)
     u = units_mod.dist_suffix_lower(unit)
-    gs = fig.add_gridspec(1, 4, width_ratios=[6.5, 0.5, 1.2, 1.2], wspace=0.15)
-    ax = fig.add_subplot(gs[0, 0])
-    ax_speed = fig.add_subplot(gs[0, 2])
-    ax_quality = fig.add_subplot(gs[0, 3])
+    gs = fig.add_gridspec(2, 4, width_ratios=[6.5, 0.5, 1.2, 1.2],
+                          height_ratios=[1.1, 1.0], wspace=0.15, hspace=0.4)
+    ax = fig.add_subplot(gs[:, 0])
+    ax_trends = fig.add_subplot(gs[0, 2:])
+    ax_speed = fig.add_subplot(gs[1, 2])
+    ax_quality = fig.add_subplot(gs[1, 3])
     ax.axvline(x=0, color=Colors.TEXT_MUTED, linestyle="--", linewidth=1.5, alpha=0.6, zorder=0.5)
 
     offline_col = find_col(df, OFFLINE_ALIASES)
@@ -225,3 +230,12 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     style_axes(ax, font_scale)
 
     _draw_motivation_bars(ax_speed, ax_quality, live_shots, config, font_scale)
+
+    # Active-club session trends, top-right. Baselines come from the FULL
+    # practice history (config["trend_history"], in yards — unconverted), not
+    # the globally-filtered frame: a Club Filter or Time filter shouldn't be
+    # able to erase the club you're currently hitting from its own baseline.
+    trend_history = config.get("trend_history")
+    if trend_history is None:
+        trend_history = raw_history_df
+    live_trends.draw_trends(ax_trends, live_shots, trend_history, font_scale, unit)
