@@ -19,6 +19,7 @@ import urllib.request, urllib.error
 import pandas as pd
 
 from config import get_club_rank
+from data import on_course
 
 from data.columns import (
     find_col, CARRY_ALIASES, TOTAL_ALIASES, CLUB_SPEED_ALIASES, BALL_SPEED_ALIASES,
@@ -397,6 +398,16 @@ def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monit
         df = df[df["session_id"].astype(str).isin(wanted)]
         if df.empty:
             raise ValueError("None of the selected rounds have any shots to contribute.")
+
+    # On-course rounds never go to the community set. They're full of chips,
+    # punch-outs, layups and recovery shots, so a per-club median over them
+    # doesn't describe how far the user hits that club — which is the only
+    # question the community data answers. Enforced here as well as in the
+    # picker UI so it's a property of the wire format, not of one dialog.
+    df = on_course.practice_view(df, exclude_on_course=True)
+    if df.empty:
+        raise ValueError("Only practice sessions can be contributed, and the "
+                         "selected rounds are all on-course.")
 
     # Putts (and any other non-swing strokes tagged "Putter") are on-course
     # scoring artifacts with launch data copied from the preceding shot — never

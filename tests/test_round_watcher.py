@@ -236,6 +236,14 @@ class _LateLookup:
         self.payload = payload or {"clubspeed": 95.0, "smashfactor": 1.42, "club": "7I"}
         self.calls = 0
 
+    def reset(self, misses=None):
+        """Zero the call counter after baselining, so a test can measure only the
+        lookups it cares about. Baselining consumes one lookup per shot already in
+        currentRound.dat — see check_now's first-observation branch."""
+        self.calls = 0
+        if misses is not None:
+            self.misses = misses
+
     def lookup(self, ball_speed, carry):
         self.calls += 1
         if self.calls <= self.misses:
@@ -252,6 +260,7 @@ def test_shot_arriving_without_club_data_is_backfilled(tmp_path):
 
     _write(round_file, [_shot("a")])
     watcher.check_now()                      # baseline
+    lookup.reset()                           # ignore the baseline shot's lookup
     time.sleep(0.01)                         # distinct mtime, or the poll no-ops
     _write(round_file, [_shot("a"), _shot("b")])
     watcher.check_now()                      # shot b arrives, lookup misses
@@ -281,6 +290,7 @@ def test_backfill_gives_up_after_the_retry_budget(tmp_path):
 
     _write(round_file, [_shot("a")])
     watcher.check_now()
+    lookup.reset()                           # ignore the baseline shot's lookup
     time.sleep(0.01)                         # distinct mtime, or the poll no-ops
     _write(round_file, [_shot("a"), _shot("b")])
     watcher.check_now()
@@ -301,6 +311,7 @@ def test_shot_that_already_has_club_data_is_never_queued(tmp_path):
 
     _write(round_file, [_shot("a")])
     watcher.check_now()
+    lookup.reset()                           # ignore the baseline shot's lookup
     time.sleep(0.01)                         # distinct mtime, or the poll no-ops
     _write(round_file, [_shot("a"), _shot("b")])
     watcher.check_now()
@@ -316,6 +327,7 @@ def test_retries_default_off_so_existing_callers_are_unchanged(tmp_path):
 
     _write(round_file, [_shot("a")])
     watcher.check_now()
+    lookup.reset()                           # ignore the baseline shot's lookup
     time.sleep(0.01)                         # distinct mtime, or the poll no-ops
     _write(round_file, [_shot("a"), _shot("b")])
     watcher.check_now()
@@ -323,3 +335,87 @@ def test_retries_default_off_so_existing_callers_are_unchanged(tmp_path):
     assert watcher._pending_club_data == []
     watcher._retry_club_data()
     assert lookup.calls == 1
+
+
+class _ClearingLookup:
+    """A ClubDataLookup that answers while the round is live and then goes empty,
+    the way GSPro clears DrivingRangeShot when a range session ends."""
+
+    def __init__(self):
+        self.cleared = False
+
+    def lookup(self, ball_speed, carry):
+        if self.cleared:
+            return {}
+        return {"clubspeed": 95.0, "smashfactor": 1.42, "aoa": -2.1, "club": "7I"}
+
+
+def test_club_data_survives_gspro_clearing_the_table_before_archive(tmp_path):
+    """The regression this guards cost 6 of 9 real practice sessions their club
+    speed: archive_round re-derived every row with a fresh GSPro.db read, and by
+    then GSPro had wiped the range shots — even though the lookup had already
+    succeeded during play."""
+    lookup = _ClearingLookup()
+    watcher, round_file, data_dir, *_ = _make_watcher(tmp_path, club_lookup=lookup)
+
+    _write(round_file, [_shot("a")])
+    watcher.check_now()                      # baseline (shot a is buffered)
+    time.sleep(0.01)
+    _write(round_file, [_shot("a"), _shot("b")])
+    watcher.check_now()                      # shot b arrives, club data resolves
+
+    lookup.cleared = True                    # GSPro tears down the range session
+    info = watcher.finalize_now()
+    assert info is not None
+
+    df = pd.read_parquet(info["parquet_path"])
+    assert "clubspeed" in df.columns, "club speed column vanished at archive time"
+    assert df["clubspeed"].notna().all()
+    assert (df["clubspeed"] == 95.0).all()
+    assert (df["club"] == "7I").all()
+    # The DB's club name is authoritative, so the index must be dropped or
+    # load_master_dataframe re-resolves the club back to the ClubIndex one.
+    assert df["club_index"].isna().all()
+
+
+def test_archive_keeps_club_data_even_with_no_ui_listener(tmp_path):
+    """Club data is captured on the poll thread regardless of whether anything is
+    listening for live shots — the archive needs it either way."""
+    lookup = _ClearingLookup()
+    round_file = tmp_path / "currentRound.dat"
+    data_dir = tmp_path / "parquet_data"
+    raw_dir = tmp_path / "live_rounds_raw"
+    data_dir.mkdir()
+    raw_dir.mkdir()
+    watcher = LiveRoundWatcher(
+        round_file=round_file, data_dir=data_dir, raw_archive_dir=raw_dir,
+        on_new_shot=None, club_lookup=lookup)
+
+    _write(round_file, [_shot("a")])
+    watcher.check_now()
+    time.sleep(0.01)
+    _write(round_file, [_shot("a"), _shot("b")])
+    watcher.check_now()
+
+    lookup.cleared = True
+    info = watcher.finalize_now()
+    df = pd.read_parquet(info["parquet_path"])
+    assert (df["clubspeed"] == 95.0).all()
+
+
+def test_a_new_round_does_not_inherit_the_previous_rounds_club_data(tmp_path):
+    lookup = _ClearingLookup()
+    watcher, round_file, *_ = _make_watcher(tmp_path, club_lookup=lookup)
+
+    _write(round_file, [_shot("a")])
+    watcher.check_now()
+    time.sleep(0.01)
+    _write(round_file, [_shot("a"), _shot("b")])
+    watcher.check_now()
+    assert watcher._club_data_by_shot
+
+    time.sleep(0.01)
+    _write(round_file, [_shot("z")])         # GSPro reset -> new session
+    watcher.check_now()
+
+    assert set(watcher._club_data_by_shot) == {"z"}, "stale shots carried over"

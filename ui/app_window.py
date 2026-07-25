@@ -1542,6 +1542,21 @@ class SimAnalyticsApp:
             f"Archived {info['shot_count']} live-tracked shot{plural} from your {label} round.",
             tone="success",
         )
+        # Say so when a practice round lands without club speed. currentRound.dat
+        # never carries it — it comes from GSPro.db's DrivingRangeShot table, which
+        # GSPro clears when a range session ends — so this can still fail, and a
+        # silent failure means an empty Swing Efficiency panel and no smash factor
+        # for the session with nothing explaining why. On-course rounds are exempt:
+        # their shots are never in DrivingRangeShot at all, so having no club data
+        # is expected rather than a problem.
+        if (info["round_type"] == "practice" and info["shot_count"]
+                and not info.get("club_data_shots")):
+            show_toast(
+                self.root,
+                "No club speed for this session — GSPro didn't have it in GSPro.db. "
+                "Export the session from GSPro as a CSV and drop it in to fill it in.",
+                tone="warning", duration_ms=9000,
+            )
         # The round is safely on disk at this point. The reload/rebuild/repaint
         # below is the single heaviest thing this app does, and the auto-archive
         # path lands here moments after the user's FIRST SWING of their next

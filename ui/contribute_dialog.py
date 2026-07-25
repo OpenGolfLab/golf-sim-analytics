@@ -29,6 +29,7 @@ from ui import theme
 from ui.sent_snapshot import show_sent_snapshot
 
 import contribute
+from data import on_course
 from data.store import load_master_dataframe
 
 log = logging.getLogger(__name__)
@@ -198,6 +199,16 @@ def build_contribute_body(card, close, configured_name: str | None = None):
 
     try:
         df = load_master_dataframe(config.DATA_DIR)
+        # Practice only. On-course rounds are deliberately not contributable:
+        # they're full of chips, punch-outs, layups and recovery shots, so their
+        # per-club medians don't describe how far the user hits a club — which is
+        # the entire question the community data set answers. Contributing them
+        # would quietly poison the aggregate for everyone, and unlike the
+        # practice dashboards (where the same shots are merely excluded by a
+        # user-facing preference) there's no reading of "community club medians"
+        # that wants them. Filtered here at the source rather than in
+        # _session_rows so nothing downstream can offer them by accident.
+        df = on_course.practice_view(df, exclude_on_course=True)
     except Exception:  # noqa: BLE001
         df = pd.DataFrame()
     sessions = _session_rows(df)

@@ -7,6 +7,7 @@ import io
 import zipfile
 
 import pandas as pd
+import pytest
 
 import contribute
 
@@ -358,3 +359,55 @@ def test_snapshot_reflects_a_sent_payload_end_to_end(tmp_path):
     assert s["shot_count"] == manifest["shot_count"] == 4
     assert sum(row["n"] for row in s["clubs"]) == 4
     assert "Putter" not in {row["club"] for row in s["clubs"]}
+
+
+# ---------------------------------------------------------------------------
+# On-course rounds are never contributable.
+# ---------------------------------------------------------------------------
+def _mixed_round_type_df():
+    return pd.DataFrame({
+        "session_id": ["live-1-practice", "live-1-practice",
+                       "live-2-on_course", "live-2-on_course"],
+        "round_type": ["practice", "practice", "on_course", "on_course"],
+        "club": ["Dr", "7I", "Dr", "7I"],
+        "ballspeed": [170.0, 120.0, 168.0, 118.0],
+        "launch_angle": [12.0, 17.0, 13.0, 18.0],
+        "backspin": [2600.0, 6200.0, 2700.0, 6300.0],
+        "carry": [270.0, 165.0, 265.0, 160.0],
+    })
+
+
+def test_on_course_rounds_are_stripped_from_a_bundle(tmp_path):
+    """A per-club median over on-course shots doesn't describe how far someone
+    hits a club — it's chips, punch-outs, layups and recoveries — so it must
+    never reach the community set, whatever the caller asks for."""
+    app_dir = str(tmp_path)
+    contribute.record_consent(app_dir, True)
+    manifest, out = contribute._prepare(
+        _mixed_round_type_df(), app_dir=app_dir, handicap_band="5-9",
+        launch_monitor="Uneekor EYE XO2", app_version="test", round_dp=1)
+    assert manifest["shot_count"] == 2
+    assert manifest["provenance"]["live_tracked"] == 2
+
+
+def test_selecting_only_an_on_course_round_is_refused(tmp_path):
+    """Belt and braces: the picker doesn't offer them, but if a caller passes
+    on-course session ids anyway it must fail loudly rather than send them."""
+    app_dir = str(tmp_path)
+    contribute.record_consent(app_dir, True)
+    with pytest.raises(ValueError, match="practice"):
+        contribute._prepare(
+            _mixed_round_type_df(), app_dir=app_dir, handicap_band="5-9",
+            launch_monitor="Uneekor EYE XO2", app_version="test", round_dp=1,
+            session_ids=["live-2-on_course"])
+
+
+def test_frames_without_round_type_are_unaffected(tmp_path):
+    """CSV-imported history predates round_type; those sessions must still be
+    contributable exactly as before."""
+    app_dir = str(tmp_path)
+    contribute.record_consent(app_dir, True)
+    manifest, _out = contribute._prepare(
+        _df(), app_dir=app_dir, handicap_band="5-9",
+        launch_monitor="Uneekor EYE XO2", app_version="test", round_dp=1)
+    assert manifest["shot_count"] == 4  # 5 rows less the Putter
