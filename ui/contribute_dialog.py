@@ -15,6 +15,7 @@ before submitting.
 """
 from __future__ import annotations
 
+import logging
 import tkinter as tk
 import webbrowser
 from tkinter import filedialog
@@ -25,9 +26,12 @@ import pandas as pd
 import config
 from config import Colors, get_club_rank  # noqa: F401 (get_club_rank kept for parity)
 from ui import theme
+from ui.sent_snapshot import show_sent_snapshot
 
 import contribute
 from data.store import load_master_dataframe
+
+log = logging.getLogger(__name__)
 
 
 # Consent copy — mirrors what contribute.build_bundle actually does, and the
@@ -420,6 +424,19 @@ def build_contribute_body(card, close, configured_name: str | None = None):
             "what was sent, and what the site will show for you.",
             Colors.SUCCESS)
         _refresh_receipts()
+        # Show what actually went public, immediately and without being asked.
+        # The receipt buttons below have always been able to export it, but they
+        # require the user to know to look — and this is the one action in the app
+        # that publishes something, so the confirmation shouldn't be opt-in.
+        if sent_payload["manifest"] and sent_payload["shots_csv"] is not None:
+            try:
+                show_sent_snapshot(root, sent_payload["manifest"],
+                                   sent_payload["shots_csv"],
+                                   on_save_receipt=_save_sent_payload)
+            except Exception:  # noqa: BLE001
+                # A failure to render the confirmation must never look like a
+                # failure to contribute — the upload already succeeded.
+                log.exception("Could not show the contribution snapshot")
 
     btns = ctk.CTkFrame(card, fg_color="transparent")
     btns.pack(fill="x", pady=(4, 0))

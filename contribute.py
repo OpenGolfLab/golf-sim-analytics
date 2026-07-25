@@ -14,9 +14,11 @@ Reuses the app's own column-alias resolution (data.columns) so it maps correctly
 regardless of how the launch monitor spelled each field.
 """
 from __future__ import annotations
-import os, re, json, uuid, hashlib, datetime, zipfile
+import os, re, io, json, uuid, hashlib, datetime, zipfile
 import urllib.request, urllib.error
 import pandas as pd
+
+from config import get_club_rank
 
 from data.columns import (
     find_col, CARRY_ALIASES, TOTAL_ALIASES, CLUB_SPEED_ALIASES, BALL_SPEED_ALIASES,
@@ -510,6 +512,126 @@ def write_receipt_zip(manifest: dict, shots_csv: str, out_root: str) -> str:
     """
     path = os.path.abspath(os.path.join(out_root, _zip_name(manifest)))
     return _write_zip(manifest, shots_csv, path)
+
+
+# ---------------------------------------------------------------------------
+# "This is what you sent" — the human-readable view of a bundle.
+#
+# summarize_bundle() takes the manifest and the shots.csv *string*, i.e. exactly
+# what send_bundle reports it POSTed, and reads the medians back out of that CSV
+# text. That indirection is the whole point: it makes the summary a description
+# of the bytes that left the machine rather than a second, parallel calculation
+# over the original DataFrame that could agree with the upload by luck and
+# disagree after any future change to _prepare. Same reasoning as
+# write_receipt_zip — see the wire-format note above.
+#
+# The medians matter because per-shot rows are what gets uploaded, but per-club
+# MEDIANS are what appears on The Lab: the site plots one dot per contributor per
+# club (see ui/charts/community.py). So the median is the number a user will
+# actually see attributed to them publicly, and it's the number they should get
+# to check before agreeing to publish.
+# ---------------------------------------------------------------------------
+# Fields worth showing per club, in display order, with their units. A subset of
+# _NUMERIC_ORDER on purpose: this is a verification screen, not a data dump.
+SUMMARY_FIELDS = [
+    ("carry", "Carry", "yds"),
+    ("total", "Total", "yds"),
+    ("ball_speed", "Ball speed", "mph"),
+    ("club_speed", "Club speed", "mph"),
+    ("smash", "Smash", ""),
+    ("launch_angle", "Launch", "deg"),
+    ("back_spin", "Back spin", "rpm"),
+    ("offline", "Offline", "yds"),
+]
+
+
+def summarize_bundle(manifest: dict, shots_csv: str) -> dict:
+    """A plain-data summary of a bundle, for showing the user what they sent.
+
+    Returns::
+
+        {"identity": [(label, value), ...],
+         "clubs": [{"club": str, "n": int, "medians": {field: float|None}}, ...],
+         "fields": [(field, label, unit), ...],
+         "shot_count": int,
+         "schema_version": str}
+
+    ``clubs`` is ordered by the app's own club ranking so it reads like a bag.
+    """
+    inst = (manifest.get("environment", {}).get("instrument") or {})
+    self_report = manifest.get("self_report") or {}
+    prov = manifest.get("provenance") or {}
+
+    monitor = inst.get("model") or inst.get("maker") or "not specified"
+    if inst.get("maker") and inst.get("model") and inst["maker"] not in inst["model"]:
+        monitor = f"{inst['maker']} {inst['model']}"
+
+    identity = [
+        ("Public name", manifest.get("display_name") or "—"),
+        ("Contributor ID", f"{str(manifest.get('contributor_uuid', ''))[:8]}…"),
+        ("Handicap band", self_report.get("handicap_band", "unknown")),
+        ("Age band", self_report.get("age_band", "unknown")),
+        ("Launch monitor", monitor),
+    ]
+
+    equip = manifest.get("equipment") or {}
+    for slot in ("driver", "irons", "wedges"):
+        item = equip.get(slot) or {}
+        text = " ".join(x for x in (item.get("brand"), item.get("model")) if x).strip()
+        if text:
+            identity.append((slot.capitalize(), text))
+
+    df = pd.read_csv(io.StringIO(shots_csv)) if shots_csv.strip() else pd.DataFrame()
+
+    # Ball model lives per-shot in the CSV, not in the manifest, so report the
+    # distinct values actually being sent rather than claiming a single one.
+    if "ball_model" in df.columns:
+        balls = sorted({str(b).strip() for b in df["ball_model"].dropna() if str(b).strip()})
+        if balls:
+            identity.append(("Ball", ", ".join(balls[:3]) + ("…" if len(balls) > 3 else "")))
+
+    if prov:
+        identity.append(("Rounds", f"{prov.get('live_tracked', 0)} live-tracked, "
+                                   f"{prov.get('imported', 0)} imported"))
+
+    present = [(f, label, unit) for f, label, unit in SUMMARY_FIELDS if f in df.columns]
+    clubs = []
+    if not df.empty and "club" in df.columns:
+        for club in sorted(df["club"].dropna().unique(), key=get_club_rank):
+            sub = df[df["club"] == club]
+            medians = {}
+            for field, _label, _unit in present:
+                vals = pd.to_numeric(sub[field], errors="coerce").dropna()
+                medians[field] = float(vals.median()) if not vals.empty else None
+            clubs.append({"club": str(club), "n": int(len(sub)), "medians": medians})
+
+    return {
+        "identity": identity,
+        "clubs": clubs,
+        "fields": present,
+        "shot_count": int(manifest.get("shot_count", len(df))),
+        "schema_version": str(manifest.get("schema_version", "")),
+    }
+
+
+def summary_text(summary: dict) -> str:
+    """The same summary as plain text, for saving or pasting somewhere."""
+    lines = ["What was sent to OpenGolfLab", "=" * 44, ""]
+    for label, value in summary["identity"]:
+        lines.append(f"{label + ':':<18}{value}")
+    lines += ["", f"{'Shots:':<18}{summary['shot_count']}",
+              f"{'Schema:':<18}v{summary['schema_version']}", "",
+              "Per-club medians (what appears on The Lab)", "-" * 44]
+    header = f"{'Club':<6}{'n':>5}  " + "".join(
+        f"{label:>13}" for _f, label, _u in summary["fields"])
+    lines.append(header)
+    for row in summary["clubs"]:
+        cells = ""
+        for field, _label, _unit in summary["fields"]:
+            v = row["medians"].get(field)
+            cells += f"{'—':>13}" if v is None else f"{v:>13.1f}"
+        lines.append(f"{row['club']:<6}{row['n']:>5}  {cells}")
+    return "\n".join(lines) + "\n"
 
 
 def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
