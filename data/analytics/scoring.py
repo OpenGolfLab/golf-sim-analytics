@@ -3,8 +3,10 @@
 Scores each shot 0-100 against a blend of two components, each in [0, 1]:
 
   * self-consistency — how the shot compares to that club's *own* distribution
-    in the frame: a longer-than-usual carry and a tighter-than-usual offline
-    both read as quality. Rewards repeatable, well-struck shots for that club.
+    in the frame: a carry close to that club's stock number and a tighter-than-
+    usual offline both read as quality. Rewards repeatable, well-struck shots
+    for that club. The driver is the documented exception — see
+    LONGER_IS_BETTER_CLUBS.
   * target — whether launch and spin land inside that club's optimal window
     (``data.analytics.targets.get_targets``, itself speed-scaled off the tour
     baseline). Full marks inside the band, linear falloff outside.
@@ -39,6 +41,23 @@ TARGET_WEIGHT = 0.5  # weight on "inside the tour-reference launch/spin window"
 # is trustworthy enough to drive the self-consistency component. Below it, the
 # shot is scored on the target component alone.
 MIN_SHOTS = 5
+
+# Clubs where carrying it further than usual is genuinely better, so the carry
+# term stays one-sided.
+#
+# For everything else it isn't, and this used to score every club as though it
+# were: the carry term was `0.5 + z/4`, monotonically increasing, so an 8-iron
+# flushed 12 yards past its stock number scored HIGHER than a perfect stock
+# 8-iron. On the course long is a miss — frequently a worse one than short,
+# since it's the side with the trouble behind the green — and this number is the
+# headline stat on the landing page and the live gauge, so it was quietly
+# rewarding the exact thing that costs shots. The carry term is now symmetric
+# about the club's own mean for every club not listed here.
+#
+# Driver only, deliberately. A 3-wood is longer-is-better off a tee and
+# absolutely not when it's a lay-up, and nothing in the data says which one a
+# given swing was.
+LONGER_IS_BETTER_CLUBS = frozenset({"Dr"})
 
 
 def _clip01(x):
@@ -89,6 +108,7 @@ class ShotScorer:
         # scalar access — this runs over the entire history on every landing
         # page render, and scalar .loc made it the slowest step of that render.
         for _club, sub in df.groupby("club"):
+            longer_is_better = str(_club).strip() in LONGER_IS_BETTER_CLUBS
             # Per-club self-consistency stats (only when the sample is big
             # enough for its own mean/spread to mean something).
             carry = pd.to_numeric(sub[carry_col], errors="coerce") if carry_col else None
@@ -117,9 +137,17 @@ class ShotScorer:
             for pos in range(len(sub)):
                 self_parts: list[float | None] = []
                 if carry_mean is not None and carry_std and not pd.isna(carry_vals[pos]):
-                    # +/-2 sigma spans the 0..1 range; at/above the club mean is good.
+                    # +/-2 sigma spans the 0..1 range either way.
                     z = (carry_vals[pos] - carry_mean) / carry_std
-                    self_parts.append(_clip01(0.5 + z / 4.0))
+                    if longer_is_better:
+                        # One-sided: past the club mean is better, full stop.
+                        self_parts.append(_clip01(0.5 + z / 4.0))
+                    else:
+                        # Symmetric about the stock number, and deliberately the
+                        # same shape as the offline term below — both are now
+                        # "how far off your own centre was this", which is what
+                        # a scoring golfer actually cares about.
+                        self_parts.append(_clip01(1.0 - abs(z) / 2.0))
                 if off_std and off_vals is not None and not pd.isna(off_vals[pos]):
                     self_parts.append(_clip01(1.0 - abs(off_vals[pos]) / (2 * off_std)))
                 self_score = _mean_of_present(self_parts)

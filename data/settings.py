@@ -28,6 +28,21 @@ log = logging.getLogger(__name__)
 
 _SETTINGS_FILE = "settings.json"
 
+# How far the user sits from the screen. Physical size alone can't distinguish a
+# 32" monitor at desk distance from a 32" panel across the room, and those want
+# very different scales — so Auto asks, instead of guessing from inches.
+#
+# "Auto" scaling is tuned for DISTANCE_DESK. The multipliers are angular: sitting
+# ~3x further away needs roughly 3x the size to subtend the same angle, but in
+# practice you also accept reading less at a glance from the mat, so these are
+# deliberately gentler than the raw ratio.
+#
+# Defined above DEFAULTS because DEFAULTS references DISTANCE_DESK.
+DISTANCE_DESK = "At a desk"
+DISTANCE_ROOM = "Across the room"
+VIEWING_DISTANCE_OPTIONS = [DISTANCE_DESK, DISTANCE_ROOM]
+_DISTANCE_MULTIPLIERS = {DISTANCE_DESK: 1.0, DISTANCE_ROOM: 1.9}
+
 # One flat dict of defaults. Keep keys stable — they're the on-disk schema.
 DEFAULTS: dict = {
     # Display scale. "Auto" derives a factor from the display's OS DPI setting
@@ -52,6 +67,10 @@ DEFAULTS: dict = {
     # normalize_equipment) next to the code that puts them on the wire.
     "age_band": "unknown",
     "equipment": {},
+    # How far the user sits from the display. Feeds "Auto" scaling only — an
+    # explicit percentage still wins outright. Defaults to "At a desk", which is
+    # what Auto has always assumed, so an existing install is unchanged.
+    "viewing_distance": DISTANCE_DESK,
     # Override for GSPro's per-user data folder (where currentRound.dat /
     # GSPro.db / Player.log live) used by live tracking. Blank = the standard
     # auto-detected location (config.GSPRO_DEFAULT_DATA_DIR); only non-standard
@@ -64,8 +83,11 @@ DEFAULTS: dict = {
     "exclude_on_course_from_practice": True,
 }
 
-# Display-scale dropdown choices, in menu order.
-UI_SCALE_OPTIONS = ["Auto", "80%", "90%", "100%", "110%", "125%", "150%", "175%", "200%"]
+# Display-scale dropdown choices, in menu order. This ran out at 200% while
+# resolve_scale() has always accepted up to 300% — so a user on a TV across the
+# room, the case that needs the top of the range most, had no way to reach it.
+UI_SCALE_OPTIONS = ["Auto", "80%", "90%", "100%", "110%", "125%", "150%",
+                    "175%", "200%", "250%", "300%"]
 
 
 def _path() -> Path:
@@ -134,7 +156,14 @@ _REF_HEIGHT = 1080          # fallback baseline when OS scaling can't be read
 _REF_DIAGONAL_IN = 16.0     # developer panel; the size multiplier is 1.0 here
 _FLOOR_DIAGONAL_IN = 10.5   # a 10" laptop — the smallest well-supported panel
 _FLOOR_MULT = 0.80          # size multiplier at/below the floor diagonal
-_MIN_SCALE, _MAX_SCALE = 0.8, 2.25
+# Ceiling raised from 2.25: at the old cap, "Across the room" on a large TV
+# clamped away most of the distance multiplier it had just been given.
+_MIN_SCALE, _MAX_SCALE = 0.8, 3.0
+# A display this big is a TV or a projector screen, not a monitor — nobody sits
+# at a desk in front of 40". When the panel is this large we assume room
+# distance even if the user never set the preference, because getting it wrong
+# in this direction leaves the app unreadable rather than merely chunky.
+_ROOM_DIAGONAL_IN = 40.0
 
 
 def _size_multiplier(diagonal_in) -> float:
@@ -158,14 +187,41 @@ def _size_multiplier(diagonal_in) -> float:
     return min(1.30, 1.0 + (d - _REF_DIAGONAL_IN) * 0.0125)
 
 
-def auto_scale_for(screen_height, diagonal_in=None, os_scaling=None) -> float:
+def _distance_multiplier(viewing_distance, diagonal_in=None) -> float:
+    """Angular-size preference for how far away the user is sitting.
+
+    An explicit preference wins. Failing that, a very large panel is assumed to
+    be a TV or projector screen and gets the room multiplier anyway — see
+    _ROOM_DIAGONAL_IN. That fallback matters because projectors commonly report
+    no EDID physical size at all, in which case there is nothing else to go on.
+    """
+    if viewing_distance in _DISTANCE_MULTIPLIERS:
+        return _DISTANCE_MULTIPLIERS[viewing_distance]
+    try:
+        d = float(diagonal_in)
+    except (TypeError, ValueError):
+        return _DISTANCE_MULTIPLIERS[DISTANCE_DESK]
+    if 7.0 <= d <= 200.0 and d >= _ROOM_DIAGONAL_IN:
+        return _DISTANCE_MULTIPLIERS[DISTANCE_ROOM]
+    return _DISTANCE_MULTIPLIERS[DISTANCE_DESK]
+
+
+def auto_scale_for(screen_height, diagonal_in=None, os_scaling=None,
+                   viewing_distance=None) -> float:
     """Resolve a concrete UI scale from measured display metrics.
 
     ``os_scaling`` (Windows' DPI factor, e.g. 1.5 for 150%) is the readability
     baseline when known; otherwise we fall back to the old screen-height ratio
     against a 1080p reference. ``diagonal_in`` (physical inches) then applies
-    the gentle size preference. Clamped to a sane range and rounded to 0.05 so
-    the result is stable across launches.
+    the gentle size preference, and ``viewing_distance`` the angular one.
+    Clamped to a sane range and rounded to 0.05 so the result is stable across
+    launches.
+
+    The viewing-distance term is what makes the big-screen case work at all.
+    Before it, a 55" TV at 100% OS scaling resolved to 1.30 — the size
+    multiplier saturates at +0.30 — which is fine two feet away and unreadable
+    from the mat, and a projector reporting no physical size resolved to 1.00
+    flat no matter how big the picture was.
     """
     try:
         base = float(os_scaling) if os_scaling else float(screen_height) / _REF_HEIGHT
@@ -173,22 +229,28 @@ def auto_scale_for(screen_height, diagonal_in=None, os_scaling=None) -> float:
         base = 1.0
     if base <= 0:
         base = 1.0
-    scale = base * _size_multiplier(diagonal_in)
+    scale = (base * _size_multiplier(diagonal_in)
+             * _distance_multiplier(viewing_distance, diagonal_in))
     scale = max(_MIN_SCALE, min(_MAX_SCALE, scale))
     return round(scale / 0.05) * 0.05
 
 
-def resolve_scale(ui_scale, screen_height, diagonal_in=None, os_scaling=None) -> float:
+def resolve_scale(ui_scale, screen_height, diagonal_in=None, os_scaling=None,
+                  viewing_distance=None) -> float:
     """Turn a stored ui_scale ("Auto" or a "125%"-style string / number) plus
-    the measured display metrics into a concrete float scale factor."""
+    the measured display metrics into a concrete float scale factor.
+
+    ``viewing_distance`` only affects "Auto" — an explicit percentage is the
+    user stating the answer outright, and nothing should second-guess it.
+    """
     if ui_scale in (None, "", "Auto", "auto"):
-        return auto_scale_for(screen_height, diagonal_in, os_scaling)
+        return auto_scale_for(screen_height, diagonal_in, os_scaling, viewing_distance)
     try:
         if isinstance(ui_scale, str):
             return max(0.5, min(3.0, float(ui_scale.strip().rstrip("%")) / 100.0))
         return max(0.5, min(3.0, float(ui_scale)))
     except (TypeError, ValueError):
-        return auto_scale_for(screen_height, diagonal_in, os_scaling)
+        return auto_scale_for(screen_height, diagonal_in, os_scaling, viewing_distance)
 
 
 def detect_display_metrics() -> tuple[int, float | None, float | None]:

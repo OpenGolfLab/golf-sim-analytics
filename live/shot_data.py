@@ -183,6 +183,7 @@ def archive_round(
     finalized_at: datetime | None = None,
     club_lookup=None,
     lm_info: dict | None = None,
+    club_data_by_shot: dict[str, dict] | None = None,
 ) -> dict:
     """Archive one finished round: a flattened Parquet file (joins every
     other archived session in every dashboard) plus a raw JSON snapshot
@@ -194,6 +195,23 @@ def archive_round(
     cross-check the contribute dialog's claimed monitor (see
     contribute.verification_block). None/{} just leaves the columns out,
     exactly like every pre-existing archive.
+
+    ``club_data_by_shot`` maps ShotID -> the club fields (clubspeed /
+    smashfactor / aoa / club) that were read from GSPro.db *at the time each
+    shot happened*, and it takes precedence over anything the archive-time
+    lookup below finds. This exists because the archive-time lookup is
+    fundamentally unreliable and the live one isn't:
+
+    GSPro clears DrivingRangeShot when a range session ends — and the end of a
+    range session is exactly what triggers this function. So the archive races
+    GSPro's teardown, and loses often. Measured across 9 real archived practice
+    sessions, only 3 came out with club speed; the other 6 have no clubspeed
+    column at all, because every shot's lookup missed. Two sessions on the same
+    range course, six days apart, landed on opposite sides of that race.
+
+    The club data was never actually unavailable — it was read successfully
+    during play and then discarded, because this function re-derives every row
+    from raw_shots instead of keeping what the live path already resolved.
     """
     finalized_at = finalized_at or datetime.now()
     round_type = round_type_for(raw_shots)
@@ -212,6 +230,30 @@ def archive_round(
             club_lookup = club_lookup.snapshot(expected_shots=len(raw_shots))
 
     rows = [flatten_shot(shot, club_lookup) for shot in raw_shots]
+
+    # Live-captured club data wins over the archive-time lookup (see the
+    # docstring). Applied per field rather than wholesale so a shot that got
+    # some of its club data from each source keeps both.
+    if club_data_by_shot:
+        for row, raw in zip(rows, raw_shots):
+            captured = club_data_by_shot.get(raw.get("ShotID"))
+            if not captured:
+                continue
+            for key, value in captured.items():
+                if value in (None, 0, 0.0):
+                    continue
+                if key == "club":
+                    # Overrides rather than fills. A captured club name can only
+                    # have come from GSPro.db, which is authoritative, whereas the
+                    # row always already has a name resolved from ClubIndex — so
+                    # a fill-only rule would never apply it. The index has to be
+                    # dropped alongside it or load_master_dataframe re-resolves
+                    # the club straight back to the ClubIndex one.
+                    row["club"] = value
+                    row["club_index"] = None
+                elif row.get(key) in (None, 0, 0.0):
+                    row[key] = value
+
     df = pd.DataFrame(rows)
     df["session_date"] = finalized_at
     df["session_id"] = session_id
@@ -229,10 +271,18 @@ def archive_round(
     except OSError:
         log.exception("Failed to write raw live-round archive %s", raw_path)
 
+    # How many shots ended up with club speed. Reported so the app can tell the
+    # user when a practice round archived without it, instead of the round just
+    # quietly landing with an empty Swing Efficiency panel — which is how six
+    # real sessions went by unnoticed before anyone looked.
+    club_data_shots = sum(
+        1 for r in rows if r.get("clubspeed") not in (None, 0, 0.0))
+
     return {
         "session_id": session_id,
         "round_type": round_type,
         "shot_count": len(raw_shots),
+        "club_data_shots": club_data_shots,
         "parquet_path": parquet_path,
         "raw_path": raw_path,
     }

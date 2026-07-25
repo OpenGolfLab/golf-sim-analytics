@@ -15,6 +15,7 @@ before submitting.
 """
 from __future__ import annotations
 
+import logging
 import tkinter as tk
 import webbrowser
 from tkinter import filedialog
@@ -25,9 +26,13 @@ import pandas as pd
 import config
 from config import Colors, get_club_rank  # noqa: F401 (get_club_rank kept for parity)
 from ui import theme
+from ui.sent_snapshot import show_sent_snapshot
 
 import contribute
+from data import on_course
 from data.store import load_master_dataframe
+
+log = logging.getLogger(__name__)
 
 
 # Consent copy — mirrors what contribute.build_bundle actually does, and the
@@ -194,6 +199,16 @@ def build_contribute_body(card, close, configured_name: str | None = None):
 
     try:
         df = load_master_dataframe(config.DATA_DIR)
+        # Practice only. On-course rounds are deliberately not contributable:
+        # they're full of chips, punch-outs, layups and recovery shots, so their
+        # per-club medians don't describe how far the user hits a club — which is
+        # the entire question the community data set answers. Contributing them
+        # would quietly poison the aggregate for everyone, and unlike the
+        # practice dashboards (where the same shots are merely excluded by a
+        # user-facing preference) there's no reading of "community club medians"
+        # that wants them. Filtered here at the source rather than in
+        # _session_rows so nothing downstream can offer them by accident.
+        df = on_course.practice_view(df, exclude_on_course=True)
     except Exception:  # noqa: BLE001
         df = pd.DataFrame()
     sessions = _session_rows(df)
@@ -316,15 +331,15 @@ def build_contribute_body(card, close, configured_name: str | None = None):
         mvar = tk.StringVar(value=prev.get("model", ""))
         equip_vars[slot] = (bvar, mvar)
         theme.body_label(bag, label, color=Colors.TEXT_PRIMARY).grid(
-            row=row, column=0, sticky="w", padx=(0, 8), pady=3)
+            row=row, column=0, sticky="w", padx=(0, 8), pady=4)
         theme.dropdown(bag, list(contribute.EQUIPMENT_BRANDS), bvar, width=130).grid(
-            row=row, column=1, padx=(0, 6), pady=3)
+            row=row, column=1, padx=(0, 6), pady=4)
         entry = ctk.CTkEntry(bag, textvariable=mvar, width=170,
                              height=theme.CONTROL_HEIGHT, corner_radius=theme.CONTROL_RADIUS,
                              font=theme.font("body"), fg_color="transparent",
                              border_color=Colors.BORDER, border_width=1,
                              placeholder_text="Model")
-        entry.grid(row=row, column=2, pady=3, sticky="w")
+        entry.grid(row=row, column=2, pady=4, sticky="w")
         bvar.trace_add("write", _persist_equipment)
         mvar.trace_add("write", _persist_equipment)
 
@@ -420,6 +435,19 @@ def build_contribute_body(card, close, configured_name: str | None = None):
             "what was sent, and what the site will show for you.",
             Colors.SUCCESS)
         _refresh_receipts()
+        # Show what actually went public, immediately and without being asked.
+        # The receipt buttons below have always been able to export it, but they
+        # require the user to know to look — and this is the one action in the app
+        # that publishes something, so the confirmation shouldn't be opt-in.
+        if sent_payload["manifest"] and sent_payload["shots_csv"] is not None:
+            try:
+                show_sent_snapshot(root, sent_payload["manifest"],
+                                   sent_payload["shots_csv"],
+                                   on_save_receipt=_save_sent_payload)
+            except Exception:  # noqa: BLE001
+                # A failure to render the confirmation must never look like a
+                # failure to contribute — the upload already succeeded.
+                log.exception("Could not show the contribution snapshot")
 
     btns = ctk.CTkFrame(card, fg_color="transparent")
     btns.pack(fill="x", pady=(4, 0))

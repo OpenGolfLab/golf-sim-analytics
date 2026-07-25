@@ -21,7 +21,8 @@ from data import units as units_mod
 from data.columns import CARRY_ALIASES, OFFLINE_ALIASES, find_col
 from ui.charts import live_trends, motivation_bars
 from ui.charts._shared import (
-    attach_hover_tooltip, club_legend, diagnostic_cols, diagnostic_lines, style_axes,
+    attach_hover_tooltip, club_legend, diagnostic_cols, diagnostic_lines,
+    offline_limit, style_axes,
 )
 from ui.empty_state import show_message
 
@@ -66,8 +67,15 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     raw_history_df = df
     df = units_mod.to_display_frame(df, unit)
     u = units_mod.dist_suffix_lower(unit)
-    gs = fig.add_gridspec(2, 4, width_ratios=[6.5, 0.5, 1.2, 1.2],
-                          height_ratios=[1.1, 1.0], wspace=0.15, hspace=0.4)
+    # Column widths: the trends card used to get 2.4 of 9.4 units (~25%) behind
+    # a 0.5-unit spacer, which left it jammed against the right edge and too
+    # narrow for its own content — "Spread ±29 yds" and a "+22.2 ▲" delta had to
+    # share it. Widening the two right-hand columns and halving the spacer pulls
+    # the whole stack left and gives the card ~33%, which is what it needs to lay
+    # its deltas out without collisions (see live_trends.draw_trends). The
+    # scatter loses ~6% of width and gets it back from autoscaling to the data.
+    gs = fig.add_gridspec(2, 4, width_ratios=[5.9, 0.25, 1.5, 1.5],
+                          height_ratios=[1.05, 1.0], wspace=0.15, hspace=0.4)
     ax = fig.add_subplot(gs[:, 0])
     ax_trends = fig.add_subplot(gs[0, 2:])
     ax_speed = fig.add_subplot(gs[1, 2])
@@ -191,8 +199,9 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     all_carry = (list(df[carry_col]) if has_history else []) + list(live_carry)
 
     if all_offline:
-        max_offline = max((abs(v) for v in all_offline if v is not None), default=25)
-        limit = max(max_offline * 1.2, 25)
+        # This session's shots are must-show: framing the axis off the history
+        # percentile is fine, hiding a miss the user just hit is not.
+        limit = offline_limit(all_offline, must_show=live_offline)
         ax.set_xlim(-limit, limit)
 
     if all_carry:

@@ -50,7 +50,8 @@ def _apply_ui_scaling() -> float:
 
     height, diagonal_in, os_scaling = settings_mod.detect_display_metrics()
     scale = settings_mod.resolve_scale(
-        settings_mod.get("ui_scale"), height, diagonal_in, os_scaling)
+        settings_mod.get("ui_scale"), height, diagonal_in, os_scaling,
+        settings_mod.get("viewing_distance"))
     try:
         ctk.deactivate_automatic_dpi_awareness()
     except Exception:

@@ -7,6 +7,7 @@ import io
 import zipfile
 
 import pandas as pd
+import pytest
 
 import contribute
 
@@ -239,3 +240,174 @@ def test_check_public_name_survives_network_failure(tmp_path):
     # Unconfigured URL: no network attempted at all.
     name, collided = contribute.check_public_name(str(tmp_path), "Tom", "")
     assert not collided and name == "Tom"
+
+
+# ---------------------------------------------------------------------------
+# summarize_bundle — the "this is what you sent" snapshot.
+#
+# The point of these is the integrity property: the summary must describe the
+# bytes that were uploaded, not a parallel calculation over the source data.
+# ---------------------------------------------------------------------------
+_SNAP_CSV = (
+    "club,ball_speed,club_speed,smash,launch_angle,back_spin,carry,total,offline,ball_model\n"
+    "7I,118.0,88.0,1.34,19.0,6800,160.0,168.0,2.0,Pro V1\n"
+    "7I,120.0,89.0,1.35,18.5,6600,170.0,176.0,-4.0,Pro V1\n"
+    "Dr,165.0,113.0,1.46,12.0,2500,270.0,295.0,5.0,Pro V1\n"
+    "Dr,168.0,114.0,1.47,11.5,2400,280.0,305.0,-9.0,Pro V1\n"
+)
+
+
+def _snap_manifest(**over):
+    m = {
+        "schema_version": "1.5",
+        "display_name": "BriskApex-264d",
+        "contributor_uuid": "abcd1234-5678-90ab-cdef-1234567890ab",
+        "shot_count": 4,
+        "self_report": {"handicap_band": "5-9", "age_band": "40-49"},
+        "environment": {"instrument": {"maker": "Uneekor", "model": "EYE XO2"}},
+        "provenance": {"live_tracked": 3, "imported": 1},
+    }
+    m.update(over)
+    return m
+
+
+def _identity(summary):
+    return dict(summary["identity"])
+
+
+def test_snapshot_medians_come_from_the_uploaded_csv():
+    """Medians are read back out of the shots.csv text, so they describe what was
+    actually posted. 7I carries of 160 and 170 must median to 165."""
+    s = contribute.summarize_bundle(_snap_manifest(), _SNAP_CSV)
+    by_club = {row["club"]: row for row in s["clubs"]}
+    assert by_club["7I"]["medians"]["carry"] == 165.0
+    assert by_club["Dr"]["medians"]["carry"] == 275.0
+    assert by_club["7I"]["n"] == 2
+
+
+def test_snapshot_surfaces_every_self_reported_field():
+    """These are the fields that describe the user publicly, so all of them have
+    to be on screen for the snapshot to be a real verification."""
+    ident = _identity(contribute.summarize_bundle(_snap_manifest(), _SNAP_CSV))
+    assert ident["Public name"] == "BriskApex-264d"
+    assert ident["Handicap band"] == "5-9"
+    assert ident["Age band"] == "40-49"
+    assert ident["Launch monitor"] == "Uneekor EYE XO2"
+    assert ident["Ball"] == "Pro V1"
+    assert "3 live-tracked" in ident["Rounds"]
+
+
+def test_snapshot_shows_equipment_only_when_given():
+    without = _identity(contribute.summarize_bundle(_snap_manifest(), _SNAP_CSV))
+    assert "Driver" not in without
+    with_equip = _identity(contribute.summarize_bundle(
+        _snap_manifest(equipment={"driver": {"brand": "Ping", "model": "G430 LST"}}),
+        _SNAP_CSV))
+    assert with_equip["Driver"] == "Ping G430 LST"
+
+
+def test_snapshot_never_exposes_the_full_contributor_uuid():
+    """The id is non-identifying but it's still the dedup key; the snapshot is a
+    screenshot-and-share surface, so it shows a prefix only."""
+    s = contribute.summarize_bundle(_snap_manifest(), _SNAP_CSV)
+    full = _snap_manifest()["contributor_uuid"]
+    assert full not in str(s["identity"])
+
+
+def test_snapshot_clubs_are_in_bag_order():
+    s = contribute.summarize_bundle(_snap_manifest(), _SNAP_CSV)
+    assert [r["club"] for r in s["clubs"]] == ["Dr", "7I"]
+
+
+def test_snapshot_handles_a_bundle_with_no_optional_columns():
+    """A minimal bundle (only the REQUIRED fields) must still summarize."""
+    csv = ("club,ball_speed,launch_angle,back_spin,carry\n"
+           "Pw,95.0,28.0,9000,110.0\n")
+    s = contribute.summarize_bundle(_snap_manifest(shot_count=1), csv)
+    fields = [f for f, _l, _u in s["fields"]]
+    assert "carry" in fields and "club_speed" not in fields
+    assert s["clubs"][0]["medians"]["carry"] == 110.0
+    assert contribute.summary_text(s)  # must not raise
+
+
+def test_snapshot_text_renders_all_clubs_and_the_name():
+    text = contribute.summary_text(
+        contribute.summarize_bundle(_snap_manifest(), _SNAP_CSV))
+    assert "BriskApex-264d" in text
+    for club in ("Dr", "7I"):
+        assert club in text
+
+
+def test_snapshot_reflects_a_sent_payload_end_to_end(tmp_path):
+    """The real guarantee: build a bundle the way the app does, then summarize
+    the manifest+csv pair that came back — the snapshot must agree with what was
+    prepared for upload, not with the input frame.
+
+    _df() carries a Putter row, which _prepare strips (putts are on-course
+    scoring artifacts with launch data cloned from the preceding shot). So the
+    input has 5 rows and the bundle has 4, and a snapshot that re-derived from
+    the DataFrame instead of the CSV would report the wrong number here — which
+    is exactly the drift this design exists to prevent."""
+    app_dir = str(tmp_path)
+    contribute.record_consent(app_dir, True)
+    df = _df()
+    assert len(df) == 5
+    manifest, out = contribute._prepare(
+        df, app_dir=app_dir, handicap_band="5-9", launch_monitor="Uneekor EYE XO2",
+        app_version="test", round_dp=1)
+    s = contribute.summarize_bundle(manifest, contribute._shots_csv(out))
+    assert s["shot_count"] == manifest["shot_count"] == 4
+    assert sum(row["n"] for row in s["clubs"]) == 4
+    assert "Putter" not in {row["club"] for row in s["clubs"]}
+
+
+# ---------------------------------------------------------------------------
+# On-course rounds are never contributable.
+# ---------------------------------------------------------------------------
+def _mixed_round_type_df():
+    return pd.DataFrame({
+        "session_id": ["live-1-practice", "live-1-practice",
+                       "live-2-on_course", "live-2-on_course"],
+        "round_type": ["practice", "practice", "on_course", "on_course"],
+        "club": ["Dr", "7I", "Dr", "7I"],
+        "ballspeed": [170.0, 120.0, 168.0, 118.0],
+        "launch_angle": [12.0, 17.0, 13.0, 18.0],
+        "backspin": [2600.0, 6200.0, 2700.0, 6300.0],
+        "carry": [270.0, 165.0, 265.0, 160.0],
+    })
+
+
+def test_on_course_rounds_are_stripped_from_a_bundle(tmp_path):
+    """A per-club median over on-course shots doesn't describe how far someone
+    hits a club — it's chips, punch-outs, layups and recoveries — so it must
+    never reach the community set, whatever the caller asks for."""
+    app_dir = str(tmp_path)
+    contribute.record_consent(app_dir, True)
+    manifest, out = contribute._prepare(
+        _mixed_round_type_df(), app_dir=app_dir, handicap_band="5-9",
+        launch_monitor="Uneekor EYE XO2", app_version="test", round_dp=1)
+    assert manifest["shot_count"] == 2
+    assert manifest["provenance"]["live_tracked"] == 2
+
+
+def test_selecting_only_an_on_course_round_is_refused(tmp_path):
+    """Belt and braces: the picker doesn't offer them, but if a caller passes
+    on-course session ids anyway it must fail loudly rather than send them."""
+    app_dir = str(tmp_path)
+    contribute.record_consent(app_dir, True)
+    with pytest.raises(ValueError, match="practice"):
+        contribute._prepare(
+            _mixed_round_type_df(), app_dir=app_dir, handicap_band="5-9",
+            launch_monitor="Uneekor EYE XO2", app_version="test", round_dp=1,
+            session_ids=["live-2-on_course"])
+
+
+def test_frames_without_round_type_are_unaffected(tmp_path):
+    """CSV-imported history predates round_type; those sessions must still be
+    contributable exactly as before."""
+    app_dir = str(tmp_path)
+    contribute.record_consent(app_dir, True)
+    manifest, _out = contribute._prepare(
+        _df(), app_dir=app_dir, handicap_band="5-9",
+        launch_monitor="Uneekor EYE XO2", app_version="test", round_dp=1)
+    assert manifest["shot_count"] == 4  # 5 rows less the Putter

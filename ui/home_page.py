@@ -31,8 +31,9 @@ import tkinter.font as tkfont
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageTk
 
-from config import FONT_FAMILY, FONT_SCALE, Colors
+from config import FONT_FAMILY, FONT_SCALE, SPACING, Colors
 from data.store import HomeStats, HomeTrends, PlayerRecords
+from ui import theme
 
 # How strongly tiles blend toward the solid surface color (1.0 = opaque
 # card, 0.0 = pure blurred photo). Chips sit a touch clearer than tiles.
@@ -108,7 +109,7 @@ def course_banner(master, image_path, title: str, scale: float = 1.0) -> ctk.CTk
     banner = ctk.CTkImage(light_image=img, dark_image=img, size=disp_size)
     label = ctk.CTkLabel(
         master, image=banner, text=title, compound="center",
-        font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SCALE["subheading"], weight="bold"),
+        font=theme.font("subheading", "bold"),
         text_color=Colors.TEXT_ACTIVE, fg_color="transparent",
     )
     label._banner_image = banner  # keep a strong ref alongside the widget
@@ -194,7 +195,7 @@ def build_home_page(parent, stats: HomeStats, image_path,
         cx = x0 + sc(26)
         cyc = (y0 + y1) / 2 + sc(10)
         q_text = "---" if q is None else str(q)
-        big_size = sc(50)
+        big_size = sc(FONT_SCALE["display"])
         canvas.create_text(cx, cyc, text=q_text, anchor="w",
                            font=(FONT_FAMILY, big_size, "bold"), fill=q_color)
         big = tkfont.Font(family=FONT_FAMILY, size=big_size, weight="bold")
@@ -240,11 +241,15 @@ def build_home_page(parent, stats: HomeStats, image_path,
 
         content_w = min(w - sc(64), sc(1320))
         x0 = (w - content_w) // 2
-        gap = sc(14)
+        gap = sc(SPACING["lg"])   # was a bare 14 — off the spacing scale
 
         canvas.create_text(
             w / 2, h * 0.13, text="Master your game", justify="center",
-            font=(FONT_FAMILY + " Light", sc(46), "italic"), fill=Colors.TEXT_ACTIVE,
+            # "display" rather than a bare 46: this and the big Shot Quality
+            # score are the app's only hero-sized type, and they were two
+            # unrelated magic numbers (46 and 50) that happened to look similar.
+            font=(FONT_FAMILY + " Light", sc(FONT_SCALE["display"]), "italic"),
+            fill=Colors.TEXT_ACTIVE,
         )
 
         if stats.total_shots == 0:
@@ -281,13 +286,24 @@ def build_home_page(parent, stats: HomeStats, image_path,
         y += tile_h + gap
 
         # Row 2 — Player Records (moved here from the sidebar).
-        rec_w = (content_w - 4 * gap) / 5
+        #
+        # Four tiles, matching row 1, so both rows sit on the same four-column
+        # grid instead of a 4-over-5 split whose internal edges never lined up.
+        #
+        # The fifth tile was "Est. handicap", and it could only ever read "---":
+        # PlayerRecords.handicap is a hardcoded default that nothing assigns to,
+        # because handicap tracking is deferred. A permanently empty tile in the
+        # most valuable space on the landing page reads as broken software, so
+        # it's better absent until there's a number to put in it. The field is
+        # left on PlayerRecords for whatever implements it — see the Sim Index
+        # item in docs/ROADMAP.md, which also covers why it must not be called a
+        # handicap.
+        rec_w = (content_w - 3 * gap) / 4
         record_tiles = [
             ("Longest drive", records.longest_drive, Colors.SUCCESS),
             ("Max club speed", records.max_club_speed, Colors.DANGER),
             ("Max ball speed", records.max_ball_speed, Colors.ACCENT),
             ("Theoretical max", records.theoretical_max_drive, Colors.WARNING),
-            ("Est. handicap", records.handicap, Colors.INFO),
         ]
         for i, (label, value, color) in enumerate(record_tiles):
             tx = int(x0 + i * (rec_w + gap))

@@ -158,6 +158,44 @@ def style_axes(ax, font_scale, grid="both"):
         ax.grid(False)
 
 
+# ---------------------------------------------------------------------------
+# Offline-axis limits for the dispersion scatters.
+#
+# Both Dispersion and Live Dispersion used to set xlim from
+# `max(abs(offline)) * 1.2`, which lets a single wild shot set the scale for the
+# whole chart: one pull 85 yards left pushed the axis to +/-100 while the actual
+# shot pattern lived inside +/-50, so half the plot area was empty and the cloud
+# you came to read was squeezed into the middle. Measured on a real 781-shot
+# history, exactly one shot was doing that.
+#
+# A high percentile instead of the max keeps the framing on the pattern. The
+# outliers are still plotted — nothing is filtered, and `must_show` forces the
+# window open far enough to include points that must stay visible (the current
+# session's live shots, where hiding a miss would be a lie about the round).
+# ---------------------------------------------------------------------------
+OFFLINE_PCTILE = 97.5
+_OFFLINE_PAD = 1.15
+_OFFLINE_FLOOR = 25.0
+
+
+def offline_limit(values, must_show=(), pctile=OFFLINE_PCTILE) -> float:
+    """Half-width for a symmetric offline axis: `ax.set_xlim(-lim, lim)`.
+
+    `values` is the full population (outliers included — they're just not
+    allowed to set the scale). `must_show` are values guaranteed to be inside
+    the returned window.
+    """
+    clean = np.asarray([abs(v) for v in values if v is not None and not pd.isna(v)],
+                       dtype=float)
+    limit = _OFFLINE_FLOOR
+    if clean.size:
+        limit = max(limit, float(np.percentile(clean, pctile)) * _OFFLINE_PAD)
+    forced = [abs(v) for v in must_show if v is not None and not pd.isna(v)]
+    if forced:
+        limit = max(limit, max(forced) * _OFFLINE_PAD)
+    return limit
+
+
 _STAR_AREA = 190 / 4  # default scatter `s` (marker area in points^2)
 
 

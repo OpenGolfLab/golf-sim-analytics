@@ -65,15 +65,15 @@ def open_club_config_dialog(root, sessions, clubs, current, on_apply):
         end_var = tk.StringVar(value=str(cfg.get("end", "") or ""))
 
         SingleSelectDropdown(grid, club_opts, club_var, accent=Colors.INFO, width=90).grid(
-            row=i + 1, column=0, padx=4, pady=3)
+            row=i + 1, column=0, padx=4, pady=4)
         ctk.CTkEntry(grid, textvariable=brand_var, width=120,
-                     placeholder_text="e.g. TSR3").grid(row=i + 1, column=1, padx=4, pady=3)
+                     placeholder_text="e.g. TSR3").grid(row=i + 1, column=1, padx=4, pady=4)
         ctk.CTkEntry(grid, textvariable=adapter_var, width=130,
-                     placeholder_text="+1 Loft, Draw").grid(row=i + 1, column=2, padx=4, pady=3)
+                     placeholder_text="+1 Loft, Draw").grid(row=i + 1, column=2, padx=4, pady=4)
         ctk.CTkEntry(grid, textvariable=start_var, width=52, justify="center",
-                     placeholder_text="1").grid(row=i + 1, column=3, padx=4, pady=3)
+                     placeholder_text="1").grid(row=i + 1, column=3, padx=4, pady=4)
         ctk.CTkEntry(grid, textvariable=end_var, width=52, justify="center",
-                     placeholder_text="all").grid(row=i + 1, column=4, padx=4, pady=3)
+                     placeholder_text="all").grid(row=i + 1, column=4, padx=4, pady=4)
         rows.append((club_var, brand_var, adapter_var, start_var, end_var))
 
     theme.body_label(card, "Ranges are 1-indexed over that club's shots in the session "

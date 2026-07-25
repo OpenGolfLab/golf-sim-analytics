@@ -88,6 +88,19 @@ log = logging.getLogger(__name__)
 MAX_ACTIVE_PLOTS = 2
 MAX_GRID_ROWS = 10  # generous upper bound used to fully reset row weights each rebuild
 
+# Sidebar sections, in display order: (registry category, card title). The title
+# differs from the category for three of them, which is the only reason this
+# isn't derived from DASHBOARDS directly. Adding a category to the registry
+# without adding it here means its dashboards silently never appear in the menu.
+_SIDEBAR_SECTIONS = (
+    ("Metrics", "Metrics Dashboards"),
+    ("Optimization", "Optimization Dashboards"),
+    ("Club Fitting", "Club Fitting"),
+    ("Speed Training", "Speed Training"),
+    ("On Course", "On-Course Play"),
+    ("Community", "Community"),
+)
+
 # Top-bar geometry. Named because these numbers have to agree with each other
 # (and with the sidebar/grid edges) — scattering the literals is how the bar
 # drifted out of alignment in the first place.
@@ -138,6 +151,8 @@ class SimAnalyticsApp:
         # restart are backed by this.
         self._settings = settings_mod.load()
         self.settings_ui_scale = tk.StringVar(value=self._settings.get("ui_scale", "Auto"))
+        self.settings_viewing_distance = tk.StringVar(
+            value=self._settings.get("viewing_distance", settings_mod.DISTANCE_DESK))
         # Distance display unit (yards/meters) — display-only, persisted.
         self.settings_units = tk.StringVar(value=self._settings.get("units", units_mod.YARDS))
         # Public name shown beside contributed data on opengolflab.org. Blank =
@@ -267,12 +282,23 @@ class SimAnalyticsApp:
         self.plot_font_scale = 14
         # Open maximized (title bar + taskbar stay visible). F11 still toggles a
         # borderless full-screen if wanted, and Escape leaves it.
-        try:
-            self.root.state("zoomed")
-        except tk.TclError:
-            self.root.attributes("-zoomed", True)
+        #
+        # Deferred via after() on purpose: Tk silently drops a state("zoomed") on
+        # a window that hasn't been mapped yet, and at this point in startup it
+        # hasn't (app.py builds the whole UI behind -alpha 0 before mainloop
+        # runs). Calling it here directly left the app opening at the 1450x955
+        # geometry above on every launch, so everyone hand-maximized it every
+        # time. after() puts it on the event loop, which by definition runs once
+        # mainloop is pumping and the window is real.
+        self.root.after(0, self._maximize)
         self.root.bind("<F11>", self._toggle_fullscreen)
         self.root.bind("<Escape>", self._exit_fullscreen)
+        # Quick zoom. Both the shifted and unshifted forms of the +/- keys, and
+        # the numpad ones, because users reach for whichever their keyboard has.
+        for seq in ("<Control-plus>", "<Control-equal>", "<Control-KP_Add>"):
+            self.root.bind(seq, lambda _e: self._nudge_ui_scale(+1))
+        for seq in ("<Control-minus>", "<Control-underscore>", "<Control-KP_Subtract>"):
+            self.root.bind(seq, lambda _e: self._nudge_ui_scale(-1))
 
         self.plot_state = self._build_plot_state()
 
@@ -407,6 +433,20 @@ class SimAnalyticsApp:
         except Exception:
             log.debug("Could not theme the native title bar", exc_info=True)
 
+    def _maximize(self) -> None:
+        """Maximize the window, falling back to the X11 attribute form.
+
+        Only effective once the window is mapped — see the deferred call in
+        __init__ for why that matters.
+        """
+        try:
+            self.root.state("zoomed")
+        except tk.TclError:
+            try:
+                self.root.attributes("-zoomed", True)
+            except tk.TclError:
+                log.debug("Could not maximize the window", exc_info=True)
+
     def _is_fullscreen(self) -> bool:
         try:
             return bool(self.root.attributes("-fullscreen"))
@@ -421,10 +461,7 @@ class SimAnalyticsApp:
         # Leaving full-screen keeps the window maximized rather than snapping
         # back to the small default geometry.
         if not self._is_fullscreen():
-            try:
-                self.root.state("zoomed")
-            except tk.TclError:
-                pass
+            self._maximize()
 
     def _exit_fullscreen(self, _event=None):
         if self._is_fullscreen():
@@ -606,8 +643,14 @@ class SimAnalyticsApp:
             raw_archive_dir=config.LIVE_ROUNDS_RAW_DIR,
             on_new_shot=self._on_new_live_shot,
             on_round_archived=self._on_round_archived,
+            # Club speed / smash / AoA can land a beat after the shot itself at
+            # the current poll rate; this fires when they're backfilled so the
+            # live panel and gauges pick them up (see round_watcher._retry_club_data).
+            on_shot_updated=self._on_live_shot_updated,
             schedule_on_main_thread=lambda fn: self.root.after(0, fn),
             poll_interval=config.LIVE_POLL_SECONDS,
+            club_data_retries=config.LIVE_CLUB_DATA_RETRIES,
+            club_data_retry_interval=config.LIVE_CLUB_DATA_RETRY_SECONDS,
             # Enriches live/archived range shots with club speed, smash and AoA
             # from GSPro.db (currentRound.dat doesn't carry them).
             club_lookup=ClubDataLookup(gspro_dir / "GSPro.db"),
@@ -867,9 +910,12 @@ class SimAnalyticsApp:
         theme.vdivider(top_bar).pack(side=tk.RIGHT, fill=tk.Y,
                                      padx=(0, BAR_PAD_X), pady=BAR_SEP_PAD_Y)
 
-        def _filter_label(text, column, pad=(0, 5)):
+        def _filter_label(text, column, pad=(0, 4)):
+            # "body", not "caption". These label the three controls used more than
+            # anything else in the app, and caption is the smallest size in the
+            # scale — the most-reached-for controls had the least legible labels.
             lbl = theme.body_label(filter_frame, text, color=Colors.TEXT_MUTED,
-                                   font=theme.font("caption"))
+                                   font=theme.font("body"))
             lbl.grid(row=0, column=column, padx=pad)
             return lbl
 
@@ -879,14 +925,14 @@ class SimAnalyticsApp:
             on_change=self._on_filter_changed, width=150,
         ).grid(row=0, column=1)
 
-        _filter_label("Club", 2, pad=(BAR_GAP_GROUP, 5))
+        _filter_label("Club", 2, pad=(BAR_GAP_GROUP, 4))
         self.global_club_selector = MultiSelectDropdown(
             filter_frame, self.global_club_vars, on_change=self._on_filter_changed,
             width=140, item_label="Clubs", item_colors=config.CLUB_COLORS,
         )
         self.global_club_selector.grid(row=0, column=3)
 
-        _filter_label("Quality", 4, pad=(BAR_GAP_GROUP, 5))
+        _filter_label("Quality", 4, pad=(BAR_GAP_GROUP, 4))
         SingleSelectDropdown(
             filter_frame, filters_mod.QUALITY_FILTER_OPTIONS, self.global_quality_var,
             on_change=self._on_filter_changed, width=190,
@@ -895,7 +941,7 @@ class SimAnalyticsApp:
         # "Today's Temp": type the temperature to normalize distances to
         # standard conditions. Shown only when enabled in Settings; the value
         # in the box is the switch (blank = no normalization).
-        self.temp_norm_label = _filter_label("Today's Temp", 6, pad=(BAR_GAP_GROUP, 5))
+        self.temp_norm_label = _filter_label("Today's Temp", 6, pad=(BAR_GAP_GROUP, 4))
         attach_tooltip(self.temp_norm_label,
                        "Enter today's temperature — this normalizes your carry/total "
                        "distances to standard conditions so sessions hit on different "
@@ -966,54 +1012,24 @@ class SimAnalyticsApp:
         if banner is not None:
             banner.pack(fill=tk.X, padx=12, pady=(12, 4))
 
-        metrics_card, metrics_body = theme.section_card(
-            sidebar, "Metrics Dashboards", accent=Colors.INFO,
-        )
-        metrics_card.pack(fill=tk.X, padx=12, pady=(8, 8))
-        for d in DASHBOARDS:
-            if d.category == "Metrics":
-                self._nav_item(metrics_body, d)
-
-        opt_card, opt_body = theme.section_card(
-            sidebar, "Optimization Dashboards", accent=Colors.WARNING,
-        )
-        opt_card.pack(fill=tk.X, padx=12, pady=(0, 8))
-        for d in DASHBOARDS:
-            if d.category == "Optimization":
-                self._nav_item(opt_body, d)
-
-        fitting_card, fitting_body = theme.section_card(
-            sidebar, "Club Fitting", accent=Colors.SUCCESS,
-        )
-        fitting_card.pack(fill=tk.X, padx=12, pady=(0, 8))
-        for d in DASHBOARDS:
-            if d.category == "Club Fitting":
-                self._nav_item(fitting_body, d)
-
-        speed_card, speed_body = theme.section_card(
-            sidebar, "Speed Training", accent=Colors.DANGER,
-        )
-        speed_card.pack(fill=tk.X, padx=12, pady=(0, 8))
-        for d in DASHBOARDS:
-            if d.category == "Speed Training":
-                self._nav_item(speed_body, d)
-
-        course_card, course_body = theme.section_card(
-            sidebar, "On-Course Play", accent=Colors.SUCCESS,
-        )
-        course_card.pack(fill=tk.X, padx=12, pady=(0, 8))
-        for d in DASHBOARDS:
-            if d.category == "On Course":
-                self._nav_item(course_body, d)
-
-        community_card, community_body = theme.section_card(
-            sidebar, "Community", accent=Colors.ACCENT,
-        )
-        community_card.pack(fill=tk.X, padx=12, pady=(0, 8))
-        for d in DASHBOARDS:
-            if d.category == "Community":
-                self._nav_item(community_body, d)
-        self._kofi_link(community_card.header)
+        # One card per registry category, built from the table below rather than
+        # six near-identical hand-written blocks. Beyond the duplication, those
+        # blocks each passed their own `accent` colour — which section_card has
+        # documented as ignored since the header went flat bronze — so the
+        # arguments implied six colour-coded groups that never rendered.
+        #
+        # The pady rhythm now comes from SPACING instead of a literal 12/8, which
+        # is what keeps the six cards on the same vertical grid by construction.
+        pad_x = config.SPACING["md"]
+        gap = config.SPACING["sm"]
+        for i, (category, title) in enumerate(_SIDEBAR_SECTIONS):
+            card, body = theme.section_card(sidebar, title)
+            card.pack(fill=tk.X, padx=pad_x, pady=(gap if i == 0 else 0, gap))
+            for d in DASHBOARDS:
+                if d.category == category:
+                    self._nav_item(body, d)
+            if category == "Community":
+                self._kofi_link(card.header)
 
     def _kofi_link(self, header):
         """A quiet "Fuel the Lab" link on the Community section's title row —
@@ -1034,13 +1050,18 @@ class SimAnalyticsApp:
 
     def _nav_item(self, sidebar, d):
         entry = self.plot_state[d.name]
-        row = ctk.CTkFrame(sidebar, fg_color="transparent", corner_radius=6)
-        row.pack(side=tk.TOP, fill=tk.X, padx=4, pady=1)
+        row = ctk.CTkFrame(sidebar, fg_color="transparent", corner_radius=theme.CONTROL_RADIUS)
+        row.pack(side=tk.TOP, fill=tk.X, padx=config.SPACING["xs"], pady=2)
         cb = theme.nav_checkbox(
             row, text=d.name, variable=entry["var"], command=self.make_toggle_cmd(entry),
-            font=theme.font("subheading"), text_color=Colors.TEXT_MUTED,
+            # "label" is the token for interactive control text, which is what a
+            # nav item is. Same rendered size it had as "subheading" before that
+            # token moved up to 18 — the change here keeps nav rows their current
+            # height rather than growing the whole menu.
+            font=theme.font("label"), text_color=Colors.TEXT_MUTED,
         )
-        cb.pack(side=tk.TOP, fill=tk.X, padx=6, pady=4)
+        cb.pack(side=tk.TOP, fill=tk.X, padx=config.SPACING["sm"] - 2,
+                pady=config.SPACING["xs"] - 1)
         entry["nav_row"] = row
         entry["nav_cb"] = cb
         self._style_nav_item(entry)
@@ -1398,6 +1419,27 @@ class SimAnalyticsApp:
         elif self.global_time_var.get() == filters_mod.TIME_CURRENT_SESSION:
             self.refresh_all_active_plots()
 
+    def _on_live_shot_updated(self, flat_shot: dict) -> None:
+        """Called (on the main thread) when a shot already on screen has had its
+        club data backfilled from GSPro.db a fraction of a second after arriving
+        (see round_watcher._retry_club_data).
+
+        The dict is the same object already sitting in self.live_shot_buffer (and
+        in the Club Comparison capture list, if one is armed), so nothing gets
+        appended here — the values are simply present now, and what's needed is a
+        redraw of whatever displays them.
+
+        The speed-record check is re-run because it reads clubspeed, which was
+        absent on arrival: that's the one derived thing genuinely missed the first
+        time. It's safe to repeat — it only toasts when the value beats the
+        running best, which it has already been compared against.
+        """
+        self._check_speed_record(flat_shot)
+        cc = self.plot_state.get(CLUB_COMPARE_NAME)
+        if cc is not None and cc["var"].get() and "canvas" in cc:
+            self.update_single_plot(CLUB_COMPARE_NAME, self._active_count())
+        self._rerender_live()
+
     def _edit_live_shot(self, shot: dict) -> None:
         """Click-to-edit on a Live Dispersion point: reassign the shot's club
         (fix a mis-clubbed shot) or delete it, in the in-memory buffer before it
@@ -1503,6 +1545,21 @@ class SimAnalyticsApp:
             f"Archived {info['shot_count']} live-tracked shot{plural} from your {label} round.",
             tone="success",
         )
+        # Say so when a practice round lands without club speed. currentRound.dat
+        # never carries it — it comes from GSPro.db's DrivingRangeShot table, which
+        # GSPro clears when a range session ends — so this can still fail, and a
+        # silent failure means an empty Swing Efficiency panel and no smash factor
+        # for the session with nothing explaining why. On-course rounds are exempt:
+        # their shots are never in DrivingRangeShot at all, so having no club data
+        # is expected rather than a problem.
+        if (info["round_type"] == "practice" and info["shot_count"]
+                and not info.get("club_data_shots")):
+            show_toast(
+                self.root,
+                "No club speed for this session — GSPro didn't have it in GSPro.db. "
+                "Export the session from GSPro as a CSV and drop it in to fill it in.",
+                tone="warning", duration_ms=9000,
+            )
         # The round is safely on disk at this point. The reload/rebuild/repaint
         # below is the single heaviest thing this app does, and the auto-archive
         # path lands here moments after the user's FIRST SWING of their next
@@ -1716,7 +1773,27 @@ class SimAnalyticsApp:
         ).pack(side="right")
         theme.body_label(card, "Sizes the whole app up or down. “Auto” fits your "
                          "display — smaller on a compact laptop, larger on a big monitor "
-                         "or TV. Pick a percentage to override it.", color=Colors.TEXT_MUTED,
+                         "or TV. Pick a percentage to override it, or press "
+                         "Ctrl + and Ctrl − any time.", color=Colors.TEXT_MUTED,
+                         font=theme.font("caption"), wraplength=380, justify="left").pack(
+            anchor="w", pady=(6, 12))
+
+        # Viewing distance. Physical size can't tell a 32" desk monitor from a
+        # 32" panel across the room, and those want very different scales — so
+        # Auto asks rather than guessing. Only meaningful while scale is "Auto".
+        distance_row = ctk.CTkFrame(card, fg_color="transparent")
+        distance_row.pack(fill="x")
+        theme.body_label(distance_row, "Viewing distance",
+                         color=Colors.TEXT_PRIMARY, font=theme.font("label")).pack(
+            side="left", padx=(0, 24))
+        SingleSelectDropdown(
+            distance_row, settings_mod.VIEWING_DISTANCE_OPTIONS,
+            self.settings_viewing_distance,
+            on_change=self._apply_viewing_distance_setting, accent=Colors.INFO, width=170,
+        ).pack(side="right")
+        theme.body_label(card, "How far you sit from the screen. “Across the room” "
+                         "sizes everything up for a TV or projector you read from the "
+                         "mat. Only affects “Auto”.", color=Colors.TEXT_MUTED,
                          font=theme.font("caption"), wraplength=380, justify="left").pack(
             anchor="w", pady=(6, 12))
 
@@ -1927,6 +2004,51 @@ class SimAnalyticsApp:
         self.build_grid()
         self.refresh_all_active_plots()
 
+    def _resolve_current_scale(self, choice) -> float:
+        """The concrete scale factor for a ui_scale choice on this display,
+        including the saved viewing-distance preference (which only affects
+        "Auto" — see data.settings.resolve_scale)."""
+        height, diagonal_in, os_scaling = settings_mod.detect_display_metrics()
+        return settings_mod.resolve_scale(
+            choice, height, diagonal_in, os_scaling,
+            settings_mod.get("viewing_distance"))
+
+    def _apply_viewing_distance_setting(self, _value=None):
+        """Persist how far away the user sits and re-apply scaling. Only changes
+        anything while ui_scale is "Auto"; on an explicit percentage it's saved
+        for later but the current size is left alone, because an explicit
+        percentage is the user overriding this exact judgement."""
+        settings_mod.set("viewing_distance", self.settings_viewing_distance.get())
+        if self.settings_ui_scale.get() in ("Auto", "auto", "", None):
+            self._apply_ui_scale_setting()
+        else:
+            show_toast(self.root, "Saved — applies when Display scale is Auto.",
+                       tone="info")
+
+    def _nudge_ui_scale(self, direction: int):
+        """Ctrl+= / Ctrl+- : step through UI_SCALE_OPTIONS.
+
+        Bound because the display-scale control lives several clicks deep in
+        Settings, and the moment you most need it is when the app is too small
+        to read comfortably — which is also the moment hunting through a menu is
+        most annoying. From "Auto" the first press starts at whatever Auto
+        currently resolves to, so the size doesn't jump.
+        """
+        options = [o for o in settings_mod.UI_SCALE_OPTIONS if o != "Auto"]
+        current = self.settings_ui_scale.get()
+        if current in options:
+            idx = options.index(current)
+        else:
+            resolved = round(self._resolve_current_scale(current) * 100)
+            # Nearest explicit step to where Auto put us.
+            idx = min(range(len(options)),
+                      key=lambda i: abs(int(options[i].rstrip("%")) - resolved))
+        idx = max(0, min(len(options) - 1, idx + direction))
+        if options[idx] == current:
+            return
+        self.settings_ui_scale.set(options[idx])
+        self._apply_ui_scale_setting()
+
     def _apply_ui_scale_setting(self, _value=None):
         """Persist the chosen display scale and apply it live: customtkinter
         widgets rescale immediately, and the chart panels are rebuilt so their
@@ -1934,8 +2056,7 @@ class SimAnalyticsApp:
         creation, so existing panels have to be recreated)."""
         choice = self.settings_ui_scale.get()
         settings_mod.set("ui_scale", choice)
-        height, diagonal_in, os_scaling = settings_mod.detect_display_metrics()
-        scale = settings_mod.resolve_scale(choice, height, diagonal_in, os_scaling)
+        scale = self._resolve_current_scale(choice)
         self.ui_scale = scale
         try:
             ctk.set_widget_scaling(scale)
@@ -2207,7 +2328,7 @@ class SimAnalyticsApp:
         theme.add_hover_border(panel)
 
         top_bar = ctk.CTkFrame(panel, fg_color="transparent")
-        top_bar.pack(side=tk.TOP, fill=tk.X, padx=15, pady=8)
+        top_bar.pack(side=tk.TOP, fill=tk.X, padx=16, pady=8)
 
         header_color = CATEGORY_HEADER_COLOR.get(d.category, Colors.TEXT_PRIMARY)
         theme.section_label(
@@ -2227,12 +2348,12 @@ class SimAnalyticsApp:
             SingleSelectDropdown(
                 top_bar, ["Carry", "Total"], entry["dist_var"], on_change=update_local,
                 accent=Colors.INFO, width=110,
-            ).pack(side=tk.RIGHT, padx=(10, 5))
+            ).pack(side=tk.RIGHT, padx=(10, 4))
             theme.body_label(top_bar, "Distance:", color=Colors.TEXT_MUTED).pack(side=tk.RIGHT)
             SingleSelectDropdown(
                 top_bar, ["In-Depth", "Simple"], entry["detail_var"], on_change=update_local,
                 accent=Colors.INFO, width=120,
-            ).pack(side=tk.RIGHT, padx=(10, 5))
+            ).pack(side=tk.RIGHT, padx=(10, 4))
             theme.body_label(top_bar, "Detail:", color=Colors.TEXT_MUTED).pack(side=tk.RIGHT)
 
         if name == SESSION_COMPARE_NAME:
@@ -2296,7 +2417,7 @@ class SimAnalyticsApp:
             MultiSelectDropdown(
                 top_bar, self.gapping_club_vars, on_change=update_local,
                 accent=Colors.SUCCESS, width=170, item_label="Clubs", item_colors=config.CLUB_COLORS,
-            ).pack(side=tk.RIGHT, padx=(10, 5))
+            ).pack(side=tk.RIGHT, padx=(10, 4))
 
         if name == LAUNCH_SPIN_NAME and "club" in self.master_df.columns:
             clubs = sorted(self.master_df["club"].dropna().unique(), key=get_club_rank)
@@ -2307,7 +2428,7 @@ class SimAnalyticsApp:
                 SingleSelectDropdown(
                     top_bar, clubs, ls_var, on_change=update_local,
                     accent=Colors.INFO, width=110,
-                ).pack(side=tk.RIGHT, padx=(10, 5))
+                ).pack(side=tk.RIGHT, padx=(10, 4))
                 theme.body_label(top_bar, "Club:", color=Colors.TEXT_MUTED).pack(side=tk.RIGHT)
 
         # Per-panel benchmark selector (only on charts that declare
@@ -2320,7 +2441,7 @@ class SimAnalyticsApp:
             MultiSelectDropdown(
                 top_bar, bvars, on_change=update_local,
                 accent=Colors.WARNING, width=160, item_label="Benchmarks",
-            ).pack(side=tk.RIGHT, padx=(10, 5))
+            ).pack(side=tk.RIGHT, padx=(10, 4))
 
         # Chart canvas. The figure starts tiny on purpose (see
         # _bind_figure_autosize) so its "natural size" doesn't fight the
@@ -2332,7 +2453,7 @@ class SimAnalyticsApp:
         # Dark background so any transient unpainted region during a resize
         # is invisible instead of flashing white.
         canvas_widget.configure(bg=Colors.BG_SURFACE, highlightthickness=0)
-        canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=4)
 
         entry["panel"] = panel
         entry["fig"] = fig
