@@ -270,7 +270,10 @@ def section_card(master, title: str, accent: str = Colors.ACCENT, icon: str = ""
     but the header always uses the app accent so sections read uniformly.
     Returns (card, body); callers pack content into body.
     """
-    card = card_frame(master, corner_radius=12, **kwargs)
+    # SURFACE_RADIUS, not a bare 12: a section card is a surface like every other
+    # card, popup and dialog, and a third radius value in the app was a
+    # difference nobody could see and nobody had a reason for.
+    card = card_frame(master, corner_radius=SURFACE_RADIUS, **kwargs)
 
     # Padding comes from SPACING rather than literals so every section card sits
     # on the same rhythm. The vertical values are deliberately the tight end of

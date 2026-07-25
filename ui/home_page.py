@@ -31,7 +31,7 @@ import tkinter.font as tkfont
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageTk
 
-from config import FONT_FAMILY, FONT_SCALE, Colors
+from config import FONT_FAMILY, FONT_SCALE, SPACING, Colors
 from data.store import HomeStats, HomeTrends, PlayerRecords
 from ui import theme
 
@@ -241,7 +241,7 @@ def build_home_page(parent, stats: HomeStats, image_path,
 
         content_w = min(w - sc(64), sc(1320))
         x0 = (w - content_w) // 2
-        gap = sc(14)
+        gap = sc(SPACING["lg"])   # was a bare 14 — off the spacing scale
 
         canvas.create_text(
             w / 2, h * 0.13, text="Master your game", justify="center",
@@ -286,13 +286,24 @@ def build_home_page(parent, stats: HomeStats, image_path,
         y += tile_h + gap
 
         # Row 2 — Player Records (moved here from the sidebar).
-        rec_w = (content_w - 4 * gap) / 5
+        #
+        # Four tiles, matching row 1, so both rows sit on the same four-column
+        # grid instead of a 4-over-5 split whose internal edges never lined up.
+        #
+        # The fifth tile was "Est. handicap", and it could only ever read "---":
+        # PlayerRecords.handicap is a hardcoded default that nothing assigns to,
+        # because handicap tracking is deferred. A permanently empty tile in the
+        # most valuable space on the landing page reads as broken software, so
+        # it's better absent until there's a number to put in it. The field is
+        # left on PlayerRecords for whatever implements it — see the Sim Index
+        # item in docs/ROADMAP.md, which also covers why it must not be called a
+        # handicap.
+        rec_w = (content_w - 3 * gap) / 4
         record_tiles = [
             ("Longest drive", records.longest_drive, Colors.SUCCESS),
             ("Max club speed", records.max_club_speed, Colors.DANGER),
             ("Max ball speed", records.max_ball_speed, Colors.ACCENT),
             ("Theoretical max", records.theoretical_max_drive, Colors.WARNING),
-            ("Est. handicap", records.handicap, Colors.INFO),
         ]
         for i, (label, value, color) in enumerate(record_tiles):
             tx = int(x0 + i * (rec_w + gap))

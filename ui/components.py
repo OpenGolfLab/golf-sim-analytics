@@ -456,7 +456,7 @@ class SingleSelectDropdown(_PopupDropdownBase):
                 hover_color=Colors.BG_HOVER,
                 text_color=Colors.TEXT_ACTIVE if is_selected else Colors.TEXT_PRIMARY,
                 font=theme.font("label", "bold" if is_selected else "normal"),
-                corner_radius=6,
+                corner_radius=theme.CONTROL_RADIUS,
                 width=opt_w,
                 height=theme.CONTROL_HEIGHT,
                 command=lambda o=option: self._select(o),

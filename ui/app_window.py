@@ -910,9 +910,12 @@ class SimAnalyticsApp:
         theme.vdivider(top_bar).pack(side=tk.RIGHT, fill=tk.Y,
                                      padx=(0, BAR_PAD_X), pady=BAR_SEP_PAD_Y)
 
-        def _filter_label(text, column, pad=(0, 5)):
+        def _filter_label(text, column, pad=(0, 4)):
+            # "body", not "caption". These label the three controls used more than
+            # anything else in the app, and caption is the smallest size in the
+            # scale — the most-reached-for controls had the least legible labels.
             lbl = theme.body_label(filter_frame, text, color=Colors.TEXT_MUTED,
-                                   font=theme.font("caption"))
+                                   font=theme.font("body"))
             lbl.grid(row=0, column=column, padx=pad)
             return lbl
 
@@ -922,14 +925,14 @@ class SimAnalyticsApp:
             on_change=self._on_filter_changed, width=150,
         ).grid(row=0, column=1)
 
-        _filter_label("Club", 2, pad=(BAR_GAP_GROUP, 5))
+        _filter_label("Club", 2, pad=(BAR_GAP_GROUP, 4))
         self.global_club_selector = MultiSelectDropdown(
             filter_frame, self.global_club_vars, on_change=self._on_filter_changed,
             width=140, item_label="Clubs", item_colors=config.CLUB_COLORS,
         )
         self.global_club_selector.grid(row=0, column=3)
 
-        _filter_label("Quality", 4, pad=(BAR_GAP_GROUP, 5))
+        _filter_label("Quality", 4, pad=(BAR_GAP_GROUP, 4))
         SingleSelectDropdown(
             filter_frame, filters_mod.QUALITY_FILTER_OPTIONS, self.global_quality_var,
             on_change=self._on_filter_changed, width=190,
@@ -938,7 +941,7 @@ class SimAnalyticsApp:
         # "Today's Temp": type the temperature to normalize distances to
         # standard conditions. Shown only when enabled in Settings; the value
         # in the box is the switch (blank = no normalization).
-        self.temp_norm_label = _filter_label("Today's Temp", 6, pad=(BAR_GAP_GROUP, 5))
+        self.temp_norm_label = _filter_label("Today's Temp", 6, pad=(BAR_GAP_GROUP, 4))
         attach_tooltip(self.temp_norm_label,
                        "Enter today's temperature — this normalizes your carry/total "
                        "distances to standard conditions so sessions hit on different "
