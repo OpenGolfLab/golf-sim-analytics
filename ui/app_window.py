@@ -151,6 +151,8 @@ class SimAnalyticsApp:
         # restart are backed by this.
         self._settings = settings_mod.load()
         self.settings_ui_scale = tk.StringVar(value=self._settings.get("ui_scale", "Auto"))
+        self.settings_viewing_distance = tk.StringVar(
+            value=self._settings.get("viewing_distance", settings_mod.DISTANCE_DESK))
         # Distance display unit (yards/meters) — display-only, persisted.
         self.settings_units = tk.StringVar(value=self._settings.get("units", units_mod.YARDS))
         # Public name shown beside contributed data on opengolflab.org. Blank =
@@ -291,6 +293,12 @@ class SimAnalyticsApp:
         self.root.after(0, self._maximize)
         self.root.bind("<F11>", self._toggle_fullscreen)
         self.root.bind("<Escape>", self._exit_fullscreen)
+        # Quick zoom. Both the shifted and unshifted forms of the +/- keys, and
+        # the numpad ones, because users reach for whichever their keyboard has.
+        for seq in ("<Control-plus>", "<Control-equal>", "<Control-KP_Add>"):
+            self.root.bind(seq, lambda _e: self._nudge_ui_scale(+1))
+        for seq in ("<Control-minus>", "<Control-underscore>", "<Control-KP_Subtract>"):
+            self.root.bind(seq, lambda _e: self._nudge_ui_scale(-1))
 
         self.plot_state = self._build_plot_state()
 
@@ -1747,7 +1755,27 @@ class SimAnalyticsApp:
         ).pack(side="right")
         theme.body_label(card, "Sizes the whole app up or down. “Auto” fits your "
                          "display — smaller on a compact laptop, larger on a big monitor "
-                         "or TV. Pick a percentage to override it.", color=Colors.TEXT_MUTED,
+                         "or TV. Pick a percentage to override it, or press "
+                         "Ctrl + and Ctrl − any time.", color=Colors.TEXT_MUTED,
+                         font=theme.font("caption"), wraplength=380, justify="left").pack(
+            anchor="w", pady=(6, 12))
+
+        # Viewing distance. Physical size can't tell a 32" desk monitor from a
+        # 32" panel across the room, and those want very different scales — so
+        # Auto asks rather than guessing. Only meaningful while scale is "Auto".
+        distance_row = ctk.CTkFrame(card, fg_color="transparent")
+        distance_row.pack(fill="x")
+        theme.body_label(distance_row, "Viewing distance",
+                         color=Colors.TEXT_PRIMARY, font=theme.font("label")).pack(
+            side="left", padx=(0, 24))
+        SingleSelectDropdown(
+            distance_row, settings_mod.VIEWING_DISTANCE_OPTIONS,
+            self.settings_viewing_distance,
+            on_change=self._apply_viewing_distance_setting, accent=Colors.INFO, width=170,
+        ).pack(side="right")
+        theme.body_label(card, "How far you sit from the screen. “Across the room” "
+                         "sizes everything up for a TV or projector you read from the "
+                         "mat. Only affects “Auto”.", color=Colors.TEXT_MUTED,
                          font=theme.font("caption"), wraplength=380, justify="left").pack(
             anchor="w", pady=(6, 12))
 
@@ -1958,6 +1986,51 @@ class SimAnalyticsApp:
         self.build_grid()
         self.refresh_all_active_plots()
 
+    def _resolve_current_scale(self, choice) -> float:
+        """The concrete scale factor for a ui_scale choice on this display,
+        including the saved viewing-distance preference (which only affects
+        "Auto" — see data.settings.resolve_scale)."""
+        height, diagonal_in, os_scaling = settings_mod.detect_display_metrics()
+        return settings_mod.resolve_scale(
+            choice, height, diagonal_in, os_scaling,
+            settings_mod.get("viewing_distance"))
+
+    def _apply_viewing_distance_setting(self, _value=None):
+        """Persist how far away the user sits and re-apply scaling. Only changes
+        anything while ui_scale is "Auto"; on an explicit percentage it's saved
+        for later but the current size is left alone, because an explicit
+        percentage is the user overriding this exact judgement."""
+        settings_mod.set("viewing_distance", self.settings_viewing_distance.get())
+        if self.settings_ui_scale.get() in ("Auto", "auto", "", None):
+            self._apply_ui_scale_setting()
+        else:
+            show_toast(self.root, "Saved — applies when Display scale is Auto.",
+                       tone="info")
+
+    def _nudge_ui_scale(self, direction: int):
+        """Ctrl+= / Ctrl+- : step through UI_SCALE_OPTIONS.
+
+        Bound because the display-scale control lives several clicks deep in
+        Settings, and the moment you most need it is when the app is too small
+        to read comfortably — which is also the moment hunting through a menu is
+        most annoying. From "Auto" the first press starts at whatever Auto
+        currently resolves to, so the size doesn't jump.
+        """
+        options = [o for o in settings_mod.UI_SCALE_OPTIONS if o != "Auto"]
+        current = self.settings_ui_scale.get()
+        if current in options:
+            idx = options.index(current)
+        else:
+            resolved = round(self._resolve_current_scale(current) * 100)
+            # Nearest explicit step to where Auto put us.
+            idx = min(range(len(options)),
+                      key=lambda i: abs(int(options[i].rstrip("%")) - resolved))
+        idx = max(0, min(len(options) - 1, idx + direction))
+        if options[idx] == current:
+            return
+        self.settings_ui_scale.set(options[idx])
+        self._apply_ui_scale_setting()
+
     def _apply_ui_scale_setting(self, _value=None):
         """Persist the chosen display scale and apply it live: customtkinter
         widgets rescale immediately, and the chart panels are rebuilt so their
@@ -1965,8 +2038,7 @@ class SimAnalyticsApp:
         creation, so existing panels have to be recreated)."""
         choice = self.settings_ui_scale.get()
         settings_mod.set("ui_scale", choice)
-        height, diagonal_in, os_scaling = settings_mod.detect_display_metrics()
-        scale = settings_mod.resolve_scale(choice, height, diagonal_in, os_scaling)
+        scale = self._resolve_current_scale(choice)
         self.ui_scale = scale
         try:
             ctk.set_widget_scaling(scale)
