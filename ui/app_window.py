@@ -1040,10 +1040,14 @@ class SimAnalyticsApp:
     def _nav_item(self, sidebar, d):
         entry = self.plot_state[d.name]
         row = ctk.CTkFrame(sidebar, fg_color="transparent", corner_radius=theme.CONTROL_RADIUS)
-        row.pack(side=tk.TOP, fill=tk.X, padx=config.SPACING["xs"], pady=1)
+        row.pack(side=tk.TOP, fill=tk.X, padx=config.SPACING["xs"], pady=2)
         cb = theme.nav_checkbox(
             row, text=d.name, variable=entry["var"], command=self.make_toggle_cmd(entry),
-            font=theme.font("subheading"), text_color=Colors.TEXT_MUTED,
+            # "label" is the token for interactive control text, which is what a
+            # nav item is. Same rendered size it had as "subheading" before that
+            # token moved up to 18 — the change here keeps nav rows their current
+            # height rather than growing the whole menu.
+            font=theme.font("label"), text_color=Colors.TEXT_MUTED,
         )
         cb.pack(side=tk.TOP, fill=tk.X, padx=config.SPACING["sm"] - 2,
                 pady=config.SPACING["xs"] - 1)
@@ -2234,7 +2238,7 @@ class SimAnalyticsApp:
         theme.add_hover_border(panel)
 
         top_bar = ctk.CTkFrame(panel, fg_color="transparent")
-        top_bar.pack(side=tk.TOP, fill=tk.X, padx=15, pady=8)
+        top_bar.pack(side=tk.TOP, fill=tk.X, padx=16, pady=8)
 
         header_color = CATEGORY_HEADER_COLOR.get(d.category, Colors.TEXT_PRIMARY)
         theme.section_label(
@@ -2254,12 +2258,12 @@ class SimAnalyticsApp:
             SingleSelectDropdown(
                 top_bar, ["Carry", "Total"], entry["dist_var"], on_change=update_local,
                 accent=Colors.INFO, width=110,
-            ).pack(side=tk.RIGHT, padx=(10, 5))
+            ).pack(side=tk.RIGHT, padx=(10, 4))
             theme.body_label(top_bar, "Distance:", color=Colors.TEXT_MUTED).pack(side=tk.RIGHT)
             SingleSelectDropdown(
                 top_bar, ["In-Depth", "Simple"], entry["detail_var"], on_change=update_local,
                 accent=Colors.INFO, width=120,
-            ).pack(side=tk.RIGHT, padx=(10, 5))
+            ).pack(side=tk.RIGHT, padx=(10, 4))
             theme.body_label(top_bar, "Detail:", color=Colors.TEXT_MUTED).pack(side=tk.RIGHT)
 
         if name == SESSION_COMPARE_NAME:
@@ -2323,7 +2327,7 @@ class SimAnalyticsApp:
             MultiSelectDropdown(
                 top_bar, self.gapping_club_vars, on_change=update_local,
                 accent=Colors.SUCCESS, width=170, item_label="Clubs", item_colors=config.CLUB_COLORS,
-            ).pack(side=tk.RIGHT, padx=(10, 5))
+            ).pack(side=tk.RIGHT, padx=(10, 4))
 
         if name == LAUNCH_SPIN_NAME and "club" in self.master_df.columns:
             clubs = sorted(self.master_df["club"].dropna().unique(), key=get_club_rank)
@@ -2334,7 +2338,7 @@ class SimAnalyticsApp:
                 SingleSelectDropdown(
                     top_bar, clubs, ls_var, on_change=update_local,
                     accent=Colors.INFO, width=110,
-                ).pack(side=tk.RIGHT, padx=(10, 5))
+                ).pack(side=tk.RIGHT, padx=(10, 4))
                 theme.body_label(top_bar, "Club:", color=Colors.TEXT_MUTED).pack(side=tk.RIGHT)
 
         # Per-panel benchmark selector (only on charts that declare
@@ -2347,7 +2351,7 @@ class SimAnalyticsApp:
             MultiSelectDropdown(
                 top_bar, bvars, on_change=update_local,
                 accent=Colors.WARNING, width=160, item_label="Benchmarks",
-            ).pack(side=tk.RIGHT, padx=(10, 5))
+            ).pack(side=tk.RIGHT, padx=(10, 4))
 
         # Chart canvas. The figure starts tiny on purpose (see
         # _bind_figure_autosize) so its "natural size" doesn't fight the
@@ -2359,7 +2363,7 @@ class SimAnalyticsApp:
         # Dark background so any transient unpainted region during a resize
         # is invisible instead of flashing white.
         canvas_widget.configure(bg=Colors.BG_SURFACE, highlightthickness=0)
-        canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=4)
 
         entry["panel"] = panel
         entry["fig"] = fig

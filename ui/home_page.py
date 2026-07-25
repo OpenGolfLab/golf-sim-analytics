@@ -33,6 +33,7 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageTk
 
 from config import FONT_FAMILY, FONT_SCALE, Colors
 from data.store import HomeStats, HomeTrends, PlayerRecords
+from ui import theme
 
 # How strongly tiles blend toward the solid surface color (1.0 = opaque
 # card, 0.0 = pure blurred photo). Chips sit a touch clearer than tiles.
@@ -108,7 +109,7 @@ def course_banner(master, image_path, title: str, scale: float = 1.0) -> ctk.CTk
     banner = ctk.CTkImage(light_image=img, dark_image=img, size=disp_size)
     label = ctk.CTkLabel(
         master, image=banner, text=title, compound="center",
-        font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SCALE["subheading"], weight="bold"),
+        font=theme.font("subheading", "bold"),
         text_color=Colors.TEXT_ACTIVE, fg_color="transparent",
     )
     label._banner_image = banner  # keep a strong ref alongside the widget
@@ -194,7 +195,7 @@ def build_home_page(parent, stats: HomeStats, image_path,
         cx = x0 + sc(26)
         cyc = (y0 + y1) / 2 + sc(10)
         q_text = "---" if q is None else str(q)
-        big_size = sc(50)
+        big_size = sc(FONT_SCALE["display"])
         canvas.create_text(cx, cyc, text=q_text, anchor="w",
                            font=(FONT_FAMILY, big_size, "bold"), fill=q_color)
         big = tkfont.Font(family=FONT_FAMILY, size=big_size, weight="bold")
@@ -244,7 +245,11 @@ def build_home_page(parent, stats: HomeStats, image_path,
 
         canvas.create_text(
             w / 2, h * 0.13, text="Master your game", justify="center",
-            font=(FONT_FAMILY + " Light", sc(46), "italic"), fill=Colors.TEXT_ACTIVE,
+            # "display" rather than a bare 46: this and the big Shot Quality
+            # score are the app's only hero-sized type, and they were two
+            # unrelated magic numbers (46 and 50) that happened to look similar.
+            font=(FONT_FAMILY + " Light", sc(FONT_SCALE["display"]), "italic"),
+            fill=Colors.TEXT_ACTIVE,
         )
 
         if stats.total_shots == 0:

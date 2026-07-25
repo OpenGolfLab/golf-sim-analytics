@@ -23,7 +23,7 @@ def open_shot_edit_popup(root, current_club, clubs, on_pick_club, on_delete):
                  f"+{root.winfo_rooty() + root.winfo_height() // 2 - 80}")
 
     card = theme.card_frame(win)
-    card.pack(fill="both", expand=True, padx=14, pady=14)
+    card.pack(fill="both", expand=True, padx=16, pady=16)
     theme.section_label(card, "Edit shot", color=Colors.INFO).pack(anchor="w", pady=(2, 8))
 
     theme.body_label(card, "Club", color=Colors.TEXT_MUTED).pack(anchor="w")

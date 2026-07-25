@@ -221,19 +221,45 @@ class Colors:
 
 FONT_FAMILY = "Segoe UI"
 
-# Typographic scale (points): caption / body / label / subheading / heading / display
+# Typographic scale, in points.
+#
+# The old ladder was 12 / 13 / 15 / 16 / 19 / 20 / 28. Three problems: body and
+# caption were 1pt apart and label and subheading were 1pt apart, so none of
+# those pairs read as a hierarchy — they read as the same size rendered slightly
+# inconsistently; and title (19) vs heading (20) was a distinction no one can
+# see, on two tokens that mean the same thing.
+#
+# Steps are now at least 2pt, which is the point at which a size difference
+# actually registers at arm's length. The magnitudes stay deliberately close to
+# the old ones: making everything bigger is the wrong lever for "this is hard to
+# read from the couch" — that's a viewing-distance problem, and the display-scale
+# setting (data.settings.resolve_scale) is what solves it, on every size at once
+# and under the user's control. Inflating the scale here would instead break
+# layouts for the desk users who are currently fine.
 FONT_SCALE = {
-    "caption": 12,
-    "body": 13,
-    "label": 15,
-    "subheading": 16,
-    "title": 19,      # chart-panel headers
-    "heading": 20,
-    "display": 28,
+    "caption": 12,     # secondary/annotation text — filter labels, hints, tooltips
+    "body": 14,        # body copy
+    "label": 16,       # interactive control text: buttons, nav items, chips
+    "subheading": 18,  # sub-section titles inside a surface
+    "title": 21,       # chart-panel headers
+    "heading": 21,     # same size as title on purpose; both mean "surface title"
+    "display": 48,     # oversized home-page hero type (headline + the big score)
 }
 
-# Spacing rhythm (pixels)
-SPACING = {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24}
+# Spacing rhythm (pixels).
+#
+# This table used to claim a 4px grid that the UI didn't actually follow: it was
+# referenced in ui/theme.py and a handful of places in ui/app_window.py, and
+# every other module hard-coded its padding. A survey of ui/*.py found 93 pads
+# off the 4px grid — but the great majority were 2, 6 and 10, i.e. the code has
+# consistently worked to a 2px grid, not a 4px one. So `xxs` is added to describe
+# the half-step that was always there, rather than pretending 2px pads are
+# mistakes and churning a hundred call sites to remove them.
+#
+# What genuinely was arbitrary — 1, 3, 5, 14, 15 — is snapped to this scale. Use
+# a token here rather than a literal in new code; that's what keeps sibling
+# widgets aligned without every call site having to agree by luck.
+SPACING = {"xxs": 2, "xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24}
 
 # ---------------------------------------------------------------------------
 # Club-name normalization.

@@ -316,15 +316,15 @@ def build_contribute_body(card, close, configured_name: str | None = None):
         mvar = tk.StringVar(value=prev.get("model", ""))
         equip_vars[slot] = (bvar, mvar)
         theme.body_label(bag, label, color=Colors.TEXT_PRIMARY).grid(
-            row=row, column=0, sticky="w", padx=(0, 8), pady=3)
+            row=row, column=0, sticky="w", padx=(0, 8), pady=4)
         theme.dropdown(bag, list(contribute.EQUIPMENT_BRANDS), bvar, width=130).grid(
-            row=row, column=1, padx=(0, 6), pady=3)
+            row=row, column=1, padx=(0, 6), pady=4)
         entry = ctk.CTkEntry(bag, textvariable=mvar, width=170,
                              height=theme.CONTROL_HEIGHT, corner_radius=theme.CONTROL_RADIUS,
                              font=theme.font("body"), fg_color="transparent",
                              border_color=Colors.BORDER, border_width=1,
                              placeholder_text="Model")
-        entry.grid(row=row, column=2, pady=3, sticky="w")
+        entry.grid(row=row, column=2, pady=4, sticky="w")
         bvar.trace_add("write", _persist_equipment)
         mvar.trace_add("write", _persist_equipment)
 

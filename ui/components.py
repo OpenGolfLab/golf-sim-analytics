@@ -196,7 +196,7 @@ class _PopupDropdownBase(ctk.CTkFrame):
         self._popup.geometry(f"+{x}+{y}")
 
         card = theme.card_frame(self._popup, corner_radius=theme.SURFACE_RADIUS)
-        card.pack(fill="both", expand=True, padx=1, pady=1)
+        card.pack(fill="both", expand=True, padx=2, pady=2)
 
         # Kept for platforms where the popup does take focus (harmless
         # elsewhere): Escape / focus-loss inside the popup still dismiss.
@@ -273,7 +273,7 @@ class DropdownPanel:
         self._popup.bind("<Escape>", lambda _e: self.close())
 
         outer = theme.card_frame(self._popup, corner_radius=theme.SURFACE_RADIUS)
-        outer.pack(fill="both", expand=True, padx=1, pady=1)
+        outer.pack(fill="both", expand=True, padx=2, pady=2)
         self._body = ctk.CTkScrollableFrame(
             outer, fg_color="transparent", width=self.width,
             scrollbar_button_color=Colors.BG_HOVER)
@@ -415,7 +415,7 @@ def menu_item(parent, text: str, command, *, width: int = 240) -> ctk.CTkButton:
     btn = theme.ghost_button(parent, text=text, command=command, anchor="w",
                              width=width, font=theme.font("subheading"),
                              height=theme.CONTROL_HEIGHT + 4)
-    btn.pack(fill="x", pady=1)
+    btn.pack(fill="x", pady=2)
     return btn
 
 
@@ -460,7 +460,7 @@ class SingleSelectDropdown(_PopupDropdownBase):
                 width=opt_w,
                 height=theme.CONTROL_HEIGHT,
                 command=lambda o=option: self._select(o),
-            ).pack(fill="x", pady=1)
+            ).pack(fill="x", pady=2)
 
     def _select(self, option):
         self.variable.set(option)

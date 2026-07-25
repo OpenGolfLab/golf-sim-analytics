@@ -280,8 +280,14 @@ def section_card(master, title: str, accent: str = Colors.ACCENT, icon: str = ""
     header = ctk.CTkFrame(card, fg_color="transparent")
     header.pack(fill="x", padx=SPACING["md"], pady=(SPACING["sm"], SPACING["xs"] // 2))
     title_text = f"{icon}  {title}".strip() if icon else title
+    # An eyebrow label, not a peer of the rows beneath it. This used to be
+    # "subheading" bold — the same size the sidebar's nav items use — so
+    # "Metrics Dashboards" and "Dispersion" rendered identically sized and the
+    # header read as another item in the list rather than as the thing naming it.
+    # Smaller + bold + bronze puts it clearly above the content in the hierarchy
+    # while taking less vertical space, which the six-card sidebar needs.
     ctk.CTkLabel(
-        header, text=title_text, font=font("subheading", "bold"),
+        header, text=title_text, font=font("caption", "bold"),
         text_color=Colors.ACCENT, fg_color="transparent", anchor="w",
     ).pack(side="left")
 

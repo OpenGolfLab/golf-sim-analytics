@@ -29,7 +29,7 @@ def build_manage_sessions_body(card, close, sessions, on_toggle):
 
     for sid, label, is_deleted in sessions:
         row = ctk.CTkFrame(card, fg_color=Colors.BG_HOVER, corner_radius=theme.CONTROL_RADIUS)
-        row.pack(fill="x", pady=3)
+        row.pack(fill="x", pady=4)
         lbl = theme.body_label(row, label, color=Colors.TEXT_PRIMARY)
         lbl.pack(side="left", padx=12, pady=8)
         # A ghost button, not theme.danger_button: this control *toggles* between
