@@ -88,6 +88,19 @@ log = logging.getLogger(__name__)
 MAX_ACTIVE_PLOTS = 2
 MAX_GRID_ROWS = 10  # generous upper bound used to fully reset row weights each rebuild
 
+# Sidebar sections, in display order: (registry category, card title). The title
+# differs from the category for three of them, which is the only reason this
+# isn't derived from DASHBOARDS directly. Adding a category to the registry
+# without adding it here means its dashboards silently never appear in the menu.
+_SIDEBAR_SECTIONS = (
+    ("Metrics", "Metrics Dashboards"),
+    ("Optimization", "Optimization Dashboards"),
+    ("Club Fitting", "Club Fitting"),
+    ("Speed Training", "Speed Training"),
+    ("On Course", "On-Course Play"),
+    ("Community", "Community"),
+)
+
 # Top-bar geometry. Named because these numbers have to agree with each other
 # (and with the sidebar/grid edges) — scattering the literals is how the bar
 # drifted out of alignment in the first place.
@@ -988,54 +1001,24 @@ class SimAnalyticsApp:
         if banner is not None:
             banner.pack(fill=tk.X, padx=12, pady=(12, 4))
 
-        metrics_card, metrics_body = theme.section_card(
-            sidebar, "Metrics Dashboards", accent=Colors.INFO,
-        )
-        metrics_card.pack(fill=tk.X, padx=12, pady=(8, 8))
-        for d in DASHBOARDS:
-            if d.category == "Metrics":
-                self._nav_item(metrics_body, d)
-
-        opt_card, opt_body = theme.section_card(
-            sidebar, "Optimization Dashboards", accent=Colors.WARNING,
-        )
-        opt_card.pack(fill=tk.X, padx=12, pady=(0, 8))
-        for d in DASHBOARDS:
-            if d.category == "Optimization":
-                self._nav_item(opt_body, d)
-
-        fitting_card, fitting_body = theme.section_card(
-            sidebar, "Club Fitting", accent=Colors.SUCCESS,
-        )
-        fitting_card.pack(fill=tk.X, padx=12, pady=(0, 8))
-        for d in DASHBOARDS:
-            if d.category == "Club Fitting":
-                self._nav_item(fitting_body, d)
-
-        speed_card, speed_body = theme.section_card(
-            sidebar, "Speed Training", accent=Colors.DANGER,
-        )
-        speed_card.pack(fill=tk.X, padx=12, pady=(0, 8))
-        for d in DASHBOARDS:
-            if d.category == "Speed Training":
-                self._nav_item(speed_body, d)
-
-        course_card, course_body = theme.section_card(
-            sidebar, "On-Course Play", accent=Colors.SUCCESS,
-        )
-        course_card.pack(fill=tk.X, padx=12, pady=(0, 8))
-        for d in DASHBOARDS:
-            if d.category == "On Course":
-                self._nav_item(course_body, d)
-
-        community_card, community_body = theme.section_card(
-            sidebar, "Community", accent=Colors.ACCENT,
-        )
-        community_card.pack(fill=tk.X, padx=12, pady=(0, 8))
-        for d in DASHBOARDS:
-            if d.category == "Community":
-                self._nav_item(community_body, d)
-        self._kofi_link(community_card.header)
+        # One card per registry category, built from the table below rather than
+        # six near-identical hand-written blocks. Beyond the duplication, those
+        # blocks each passed their own `accent` colour — which section_card has
+        # documented as ignored since the header went flat bronze — so the
+        # arguments implied six colour-coded groups that never rendered.
+        #
+        # The pady rhythm now comes from SPACING instead of a literal 12/8, which
+        # is what keeps the six cards on the same vertical grid by construction.
+        pad_x = config.SPACING["md"]
+        gap = config.SPACING["sm"]
+        for i, (category, title) in enumerate(_SIDEBAR_SECTIONS):
+            card, body = theme.section_card(sidebar, title)
+            card.pack(fill=tk.X, padx=pad_x, pady=(gap if i == 0 else 0, gap))
+            for d in DASHBOARDS:
+                if d.category == category:
+                    self._nav_item(body, d)
+            if category == "Community":
+                self._kofi_link(card.header)
 
     def _kofi_link(self, header):
         """A quiet "Fuel the Lab" link on the Community section's title row —
@@ -1056,13 +1039,14 @@ class SimAnalyticsApp:
 
     def _nav_item(self, sidebar, d):
         entry = self.plot_state[d.name]
-        row = ctk.CTkFrame(sidebar, fg_color="transparent", corner_radius=6)
-        row.pack(side=tk.TOP, fill=tk.X, padx=4, pady=1)
+        row = ctk.CTkFrame(sidebar, fg_color="transparent", corner_radius=theme.CONTROL_RADIUS)
+        row.pack(side=tk.TOP, fill=tk.X, padx=config.SPACING["xs"], pady=1)
         cb = theme.nav_checkbox(
             row, text=d.name, variable=entry["var"], command=self.make_toggle_cmd(entry),
             font=theme.font("subheading"), text_color=Colors.TEXT_MUTED,
         )
-        cb.pack(side=tk.TOP, fill=tk.X, padx=6, pady=4)
+        cb.pack(side=tk.TOP, fill=tk.X, padx=config.SPACING["sm"] - 2,
+                pady=config.SPACING["xs"] - 1)
         entry["nav_row"] = row
         entry["nav_cb"] = cb
         self._style_nav_item(entry)

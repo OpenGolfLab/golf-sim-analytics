@@ -21,9 +21,17 @@ from data.columns import (
 )
 from ui.charts._shared import (
     attach_hover_tooltip, club_legend, diagnostic_cols, diagnostic_lines,
-    get_timeline_colormap, style_axes, styled_colorbar,
+    get_timeline_colormap, offline_limit, style_axes, styled_colorbar,
 )
 from ui.empty_state import show_message
+
+# An 11-club legend is a big box, and both corners of a dispersion cloud are
+# plausible places for real shots to be — this used to be pinned "lower left",
+# where it sat on top of the wedge data. "best" makes matplotlib pick the corner
+# with the least overlap for the pattern actually on screen, which varies per
+# user (someone who misses everything left needs the opposite corner from
+# someone who blocks it right).
+_LEGEND_LOC = "best"
 
 NAME = "Dispersion"
 CATEGORY = "Metrics"
@@ -60,8 +68,7 @@ def render(fig, df, club_colors, font_scale, config, **extra):
             _render_indepth(fig, ax, df, club_colors, font_scale, order, offline_col, y_col,
                             dist_pref, color_pref, config, u)
 
-        max_offline = df[offline_col].abs().max()
-        limit = max(max_offline * 1.2, 25)
+        limit = offline_limit(df[offline_col])
         ax.set_xlim(-limit, limit)
 
         y_min, y_max = max(0, df[y_col].min() - 25), df[y_col].max() + 25
@@ -76,7 +83,12 @@ def render(fig, df, club_colors, font_scale, config, **extra):
                 ax.axhline(y=yd, color=Colors.GRID_MAJOR, linestyle="-", linewidth=1.2, alpha=0.6, zorder=0.2)
             else:
                 ax.axhline(y=yd, color=Colors.GRID, linestyle="-", linewidth=0.8, alpha=0.5, zorder=0.1)
-        ax.set_yticks(range(y_start, y_end + 25, 25))
+        # Label only the emphasized 50-yd lines. The 25-yd lines above stay —
+        # they're useful reference — but numbering every one of them put ~15 tick
+        # labels down the axis, which read as clutter and crowded the y-label off
+        # the plot. The unlabeled 25s are still obviously the midpoints.
+        tick_start = int(math.ceil(y_start / 50.0)) * 50
+        ax.set_yticks(range(tick_start, y_end + 50, 50))
 
     ax.set_xlabel(f"Offline ({units_mod.dist_suffix(unit)})", fontsize=font_scale)
     ax.set_ylabel(f"{dist_pref} ({units_mod.dist_suffix(unit)})", fontsize=font_scale)
@@ -109,7 +121,7 @@ def _render_simple(ax, df, club_colors, font_scale, order, offline_col, y_col, d
 
     attach_hover_tooltip(ax.figure, sc, mdf, _tooltip, font_scale)
     if config.get("num_plots", 1) == 1:
-        club_legend(ax, club_colors, order, font_scale, loc="lower left")
+        club_legend(ax, club_colors, order, font_scale, loc=_LEGEND_LOC)
 
 
 def _render_indepth(fig, ax, df, club_colors, font_scale, order, offline_col, y_col,
@@ -168,7 +180,7 @@ def _render_indepth(fig, ax, df, club_colors, font_scale, order, offline_col, y_
             s=40, alpha=0.9, edgecolor="black", linewidth=0.5, zorder=1,
         )
         if config.get("num_plots", 1) == 1:
-            club_legend(ax, club_colors, order, font_scale, loc="lower left")
+            club_legend(ax, club_colors, order, font_scale, loc=_LEGEND_LOC)
 
     attach_hover_tooltip(fig, sc, pts, _tooltip, font_scale)
 

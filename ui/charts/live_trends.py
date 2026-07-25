@@ -152,6 +152,20 @@ def compute_trends(live_shots: list[dict], history_df: pd.DataFrame,
 # Drawing
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Card layout, in axes fractions. Named because the two "not enough data yet"
+# branches have to sit on the same grid as the full card — otherwise the text
+# jumps vertically the moment the third swing lands.
+# ---------------------------------------------------------------------------
+_Y_HEADER = 0.95      # club name / shot count line
+_Y_RULE = 0.86        # hairline under the header
+_ROW_TOP = 0.72       # first metric's value line
+_ROW_PITCH = 0.42     # vertical distance to the next metric block
+_DELTA_DROP = 0.19    # value line -> its delta row
+_DELTA_INDENT = 0.30  # caption -> its number, within a delta cell
+_Y_BODY = 0.42        # centre of the area below the rule, for placeholder text
+
+
 def _delta_text_color(delta, noise: float, lower_is_better: bool):
     """(text, color) for one delta cell. '—' when there's no baseline."""
     if delta is None:
@@ -182,53 +196,71 @@ def draw_trends(ax, live_shots: list[dict], history_df: pd.DataFrame,
     _c = lambda v: units_mod.to_display(v, unit) if v is not None else None
 
     club_color = get_club_color(t["club"])
-    ax.text(0.02, 0.97, t["club"], ha="left", va="top", color=club_color,
+    ax.text(0.0, _Y_HEADER, t["club"], ha="left", va="center", color=club_color,
             fontsize=big, fontweight="bold", transform=ax.transAxes)
-    ax.text(0.98, 0.97, f"{t['shots']} shot{'s' if t['shots'] != 1 else ''} this session",
-            ha="right", va="top", color=Colors.TEXT_MUTED, fontsize=small,
+    ax.text(1.0, _Y_HEADER, f"{t['shots']} shot{'s' if t['shots'] != 1 else ''} this session",
+            ha="right", va="center", color=Colors.TEXT_MUTED, fontsize=small,
             transform=ax.transAxes)
+    # Hairline under the header, so the club/shot-count line reads as a title
+    # for the numbers below rather than floating above them.
+    # plot() rather than axhline(), which insists on generating its own
+    # transform and so can't be placed in axes fractions.
+    ax.plot([0.0, 1.0], [_Y_RULE, _Y_RULE], color=Colors.BORDER, linewidth=1,
+            transform=ax.transAxes, clip_on=False, zorder=1)
 
     if t["carry"] is None:
-        ax.text(0.5, 0.5,
+        ax.text(0.5, _Y_BODY,
                 f"Need {MIN_LIVE_SHOTS} swings with {t['club']}\nfor session trends",
                 ha="center", va="center", color=Colors.TEXT_MUTED, fontsize=small,
                 transform=ax.transAxes)
         return
 
     if t["vs_last"]["sessions"] == 0:
-        ax.text(0.02, 0.72, f"Carry {_c(t['carry']):.0f} {u}", ha="left", va="center",
-                color=Colors.TEXT_PRIMARY, fontsize=mid, fontweight="bold",
-                transform=ax.transAxes)
+        # Same stacked rows as the full card, minus the delta lines there's no
+        # baseline for yet, so nothing shifts once one exists.
+        ax.text(0.0, _ROW_TOP, f"Carry {_c(t['carry']):.0f} {u}", ha="left",
+                va="center", color=Colors.TEXT_PRIMARY, fontsize=mid,
+                fontweight="bold", transform=ax.transAxes)
         if t["spread"] is not None:
-            ax.text(0.54, 0.72, f"Spread ±{_c(t['spread']):.0f} {u}", ha="left",
-                    va="center", color=Colors.TEXT_PRIMARY, fontsize=mid,
+            ax.text(0.0, _ROW_TOP - _ROW_PITCH, f"Spread ±{_c(t['spread']):.0f} {u}",
+                    ha="left", va="center", color=Colors.TEXT_PRIMARY, fontsize=mid,
                     fontweight="bold", transform=ax.transAxes)
-        ax.text(0.02, 0.38, f"First tracked session with {t['club']} —\n"
-                "trends appear next time out", ha="left", va="center",
+        ax.text(0.0, _ROW_TOP - 2 * _ROW_PITCH,
+                f"First tracked session with {t['club']} —\n"
+                "trends appear next time out", ha="left", va="top",
                 color=Colors.TEXT_MUTED, fontsize=small, transform=ax.transAxes)
         return
 
-    # Two metric blocks side by side (carry left, spread right), each with
-    # its own value line and the two baseline deltas beneath. Deltas convert
-    # like distances: they ARE distances (a difference of two).
+    # One metric block per row (carry, then spread), each a full-width value
+    # line with its two baseline deltas side by side underneath.
+    #
+    # These used to sit side by side in two half-width columns, which fought the
+    # shape of the card: it's tall and narrow, so the horizontal split left each
+    # block ~45% of an already narrow axes to fit a label and a signed delta,
+    # while most of the vertical space went unused. Stacking them spends the axis
+    # that has room to spare and gives each label the full width.
+    #
+    # Deltas convert like distances: they ARE distances (a difference of two).
     blocks = [
-        (0.02, f"Carry {_c(t['carry']):.0f} {u}",
+        (f"Carry {_c(t['carry']):.0f} {u}",
          _delta_text_color(_c(t["vs_last"]["carry"]), CARRY_NOISE_YDS, False),
          _delta_text_color(_c(t["vs_last3"]["carry"]), CARRY_NOISE_YDS, False)),
     ]
     if t["spread"] is not None:
         blocks.append(
-            (0.54, f"Spread ±{_c(t['spread']):.0f} {u}",
+            (f"Spread ±{_c(t['spread']):.0f} {u}",
              _delta_text_color(_c(t["vs_last"]["spread"]), SPREAD_NOISE_YDS, True),
              _delta_text_color(_c(t["vs_last3"]["spread"]), SPREAD_NOISE_YDS, True)))
 
-    for x, label, (txt1, col1), (txt3, col3) in blocks:
-        ax.text(x, 0.66, label, ha="left", va="center",
+    for row, (label, (txt1, col1), (txt3, col3)) in enumerate(blocks):
+        y_value = _ROW_TOP - row * _ROW_PITCH
+        y_delta = y_value - _DELTA_DROP
+        ax.text(0.0, y_value, label, ha="left", va="center",
                 color=Colors.TEXT_PRIMARY, fontsize=mid, fontweight="bold",
                 transform=ax.transAxes)
-        for y, cap, txt, col in ((0.40, "vs last", txt1, col1),
-                                 (0.18, "vs last 3", txt3, col3)):
-            ax.text(x, y, cap, ha="left", va="center",
+        for x_cap, cap, txt, col in ((0.0, "vs last", txt1, col1),
+                                     (0.52, "vs last 3", txt3, col3)):
+            ax.text(x_cap, y_delta, cap, ha="left", va="center",
                     color=Colors.TEXT_MUTED, fontsize=small, transform=ax.transAxes)
-            ax.text(x + 0.25, y, txt, ha="left", va="center", color=col,
-                    fontsize=mid, transform=ax.transAxes)
+            ax.text(x_cap + _DELTA_INDENT, y_delta, txt, ha="left", va="center",
+                    color=col, fontsize=mid, transform=ax.transAxes)

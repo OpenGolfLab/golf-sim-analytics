@@ -159,3 +159,33 @@ def test_resolve_club_index_known_bag_mapping():
     # Real mappings confirmed against this bag's clubs (config.CLUB_INDEX_MAP).
     assert resolve_club_index(0) == "Dr"
     assert resolve_club_index(24) == "Sw"
+
+
+# "Live" is deliberately absent from the sidebar: the Live Dispersion panel is
+# reached with the top-bar Go Live button, which owns starting/stopping live
+# tracking, not with a dashboard checkbox.
+_CATEGORIES_WITHOUT_A_SIDEBAR_SECTION = {"Live"}
+
+
+def test_every_dashboard_category_has_a_sidebar_section():
+    """A dashboard whose category is missing from _SIDEBAR_SECTIONS builds no nav
+    item at all — the panel exists and is unreachable. The sidebar is driven by
+    that table, so it has to cover the registry apart from the documented
+    exceptions above."""
+    from ui.app_window import _SIDEBAR_SECTIONS
+    from ui.charts.registry import DASHBOARDS
+
+    listed = {category for category, _title in _SIDEBAR_SECTIONS}
+    listed |= _CATEGORIES_WITHOUT_A_SIDEBAR_SECTION
+    missing = sorted({d.category for d in DASHBOARDS} - listed)
+    assert not missing, f"dashboard categories with no sidebar section: {missing}"
+
+
+def test_sidebar_sections_are_not_empty():
+    """Conversely, a section with no dashboards renders an empty titled card."""
+    from ui.app_window import _SIDEBAR_SECTIONS
+    from ui.charts.registry import DASHBOARDS
+
+    categories = {d.category for d in DASHBOARDS}
+    empty = [c for c, _t in _SIDEBAR_SECTIONS if c not in categories]
+    assert not empty, f"sidebar sections with no dashboards: {empty}"

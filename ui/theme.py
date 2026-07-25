@@ -272,18 +272,24 @@ def section_card(master, title: str, accent: str = Colors.ACCENT, icon: str = ""
     """
     card = card_frame(master, corner_radius=12, **kwargs)
 
+    # Padding comes from SPACING rather than literals so every section card sits
+    # on the same rhythm. The vertical values are deliberately the tight end of
+    # the scale: the sidebar stacks six of these, and the old 10/4/2/4/10 spent
+    # ~30px per card on padding alone — roughly a whole extra nav row's worth of
+    # height across the menu, for chrome rather than content.
     header = ctk.CTkFrame(card, fg_color="transparent")
-    header.pack(fill="x", padx=12, pady=(10, 4))
+    header.pack(fill="x", padx=SPACING["md"], pady=(SPACING["sm"], SPACING["xs"] // 2))
     title_text = f"{icon}  {title}".strip() if icon else title
     ctk.CTkLabel(
         header, text=title_text, font=font("subheading", "bold"),
         text_color=Colors.ACCENT, fg_color="transparent", anchor="w",
     ).pack(side="left")
 
-    divider(card).pack(fill="x", padx=12, pady=(0, 2))
+    divider(card).pack(fill="x", padx=SPACING["md"], pady=(0, SPACING["xs"] // 2))
 
     body = ctk.CTkFrame(card, fg_color="transparent")
-    body.pack(fill="both", expand=True, padx=8, pady=(4, 10))
+    body.pack(fill="both", expand=True, padx=SPACING["sm"],
+              pady=(SPACING["xs"] // 2, SPACING["sm"]))
     # Exposed so a caller can add a trailing widget on the title row (packed
     # side="right"), e.g. the Community section's Fuel-the-Lab link.
     card.header = header
