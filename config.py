@@ -137,7 +137,28 @@ GSPRO_ROUND_FILE = GSPRO_DEFAULT_DATA_DIR / "currentRound.dat"
 # range shot with the club data (ClubSpeed / SmashFactor / AoA) that
 # currentRound.dat strips out — read live to enrich live-tracked shots.
 GSPRO_DB_FILE = GSPRO_DEFAULT_DATA_DIR / "GSPro.db"
-LIVE_POLL_SECONDS = 2.0
+# How often the live watcher re-checks currentRound.dat. This is the dominant
+# term in shot-to-screen latency: a shot can't appear until the next tick, so
+# the old 2.0s meant an average ~1s wait (worst case 2s) before a shot showed
+# up on the live panel — the single biggest reason live tracking felt like it
+# lagged behind the swing.
+#
+# It's cheap to poll far more often than that. An idle poll is one exists() +
+# one stat() — measured at 0.09ms on a normal SSD — because check_now() returns
+# immediately when the mtime hasn't moved. Only a *changed* file pays the read +
+# JSON parse (~15ms for a 74-shot, 1.7MB file), and that happens at most once
+# per swing regardless of how often we look. So the interval below buys latency
+# for ~0.3ms of CPU per second.
+LIVE_POLL_SECONDS = 0.3
+# GSPro writes currentRound.dat and GSPro.db independently, and not necessarily
+# in that order — at a 0.3s poll we now routinely see a shot in the .dat file
+# before its DrivingRangeShot row lands in the DB, which is where club speed /
+# smash / AoA (and the real club name) come from. Rather than lose that data to
+# a race the old 2s interval papered over, a shot that arrives without club data
+# is re-checked against the DB this many times, this far apart, before giving up.
+# See live.round_watcher._retry_club_data.
+LIVE_CLUB_DATA_RETRIES = 6
+LIVE_CLUB_DATA_RETRY_SECONDS = 0.4
 # A round auto-archives the moment the watcher sees the FIRST shot of the
 # NEXT session — i.e. while the user is mid-swing-routine in GSPro. The
 # archive itself (parquet + raw JSON) still happens immediately; what waits

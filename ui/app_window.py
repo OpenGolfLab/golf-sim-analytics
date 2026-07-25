@@ -267,10 +267,15 @@ class SimAnalyticsApp:
         self.plot_font_scale = 14
         # Open maximized (title bar + taskbar stay visible). F11 still toggles a
         # borderless full-screen if wanted, and Escape leaves it.
-        try:
-            self.root.state("zoomed")
-        except tk.TclError:
-            self.root.attributes("-zoomed", True)
+        #
+        # Deferred via after() on purpose: Tk silently drops a state("zoomed") on
+        # a window that hasn't been mapped yet, and at this point in startup it
+        # hasn't (app.py builds the whole UI behind -alpha 0 before mainloop
+        # runs). Calling it here directly left the app opening at the 1450x955
+        # geometry above on every launch, so everyone hand-maximized it every
+        # time. after() puts it on the event loop, which by definition runs once
+        # mainloop is pumping and the window is real.
+        self.root.after(0, self._maximize)
         self.root.bind("<F11>", self._toggle_fullscreen)
         self.root.bind("<Escape>", self._exit_fullscreen)
 
@@ -407,6 +412,20 @@ class SimAnalyticsApp:
         except Exception:
             log.debug("Could not theme the native title bar", exc_info=True)
 
+    def _maximize(self) -> None:
+        """Maximize the window, falling back to the X11 attribute form.
+
+        Only effective once the window is mapped — see the deferred call in
+        __init__ for why that matters.
+        """
+        try:
+            self.root.state("zoomed")
+        except tk.TclError:
+            try:
+                self.root.attributes("-zoomed", True)
+            except tk.TclError:
+                log.debug("Could not maximize the window", exc_info=True)
+
     def _is_fullscreen(self) -> bool:
         try:
             return bool(self.root.attributes("-fullscreen"))
@@ -421,10 +440,7 @@ class SimAnalyticsApp:
         # Leaving full-screen keeps the window maximized rather than snapping
         # back to the small default geometry.
         if not self._is_fullscreen():
-            try:
-                self.root.state("zoomed")
-            except tk.TclError:
-                pass
+            self._maximize()
 
     def _exit_fullscreen(self, _event=None):
         if self._is_fullscreen():
@@ -606,8 +622,14 @@ class SimAnalyticsApp:
             raw_archive_dir=config.LIVE_ROUNDS_RAW_DIR,
             on_new_shot=self._on_new_live_shot,
             on_round_archived=self._on_round_archived,
+            # Club speed / smash / AoA can land a beat after the shot itself at
+            # the current poll rate; this fires when they're backfilled so the
+            # live panel and gauges pick them up (see round_watcher._retry_club_data).
+            on_shot_updated=self._on_live_shot_updated,
             schedule_on_main_thread=lambda fn: self.root.after(0, fn),
             poll_interval=config.LIVE_POLL_SECONDS,
+            club_data_retries=config.LIVE_CLUB_DATA_RETRIES,
+            club_data_retry_interval=config.LIVE_CLUB_DATA_RETRY_SECONDS,
             # Enriches live/archived range shots with club speed, smash and AoA
             # from GSPro.db (currentRound.dat doesn't carry them).
             club_lookup=ClubDataLookup(gspro_dir / "GSPro.db"),
@@ -1397,6 +1419,27 @@ class SimAnalyticsApp:
         # this new shot shows up everywhere immediately.
         elif self.global_time_var.get() == filters_mod.TIME_CURRENT_SESSION:
             self.refresh_all_active_plots()
+
+    def _on_live_shot_updated(self, flat_shot: dict) -> None:
+        """Called (on the main thread) when a shot already on screen has had its
+        club data backfilled from GSPro.db a fraction of a second after arriving
+        (see round_watcher._retry_club_data).
+
+        The dict is the same object already sitting in self.live_shot_buffer (and
+        in the Club Comparison capture list, if one is armed), so nothing gets
+        appended here — the values are simply present now, and what's needed is a
+        redraw of whatever displays them.
+
+        The speed-record check is re-run because it reads clubspeed, which was
+        absent on arrival: that's the one derived thing genuinely missed the first
+        time. It's safe to repeat — it only toasts when the value beats the
+        running best, which it has already been compared against.
+        """
+        self._check_speed_record(flat_shot)
+        cc = self.plot_state.get(CLUB_COMPARE_NAME)
+        if cc is not None and cc["var"].get() and "canvas" in cc:
+            self.update_single_plot(CLUB_COMPARE_NAME, self._active_count())
+        self._rerender_live()
 
     def _edit_live_shot(self, shot: dict) -> None:
         """Click-to-edit on a Live Dispersion point: reassign the shot's club

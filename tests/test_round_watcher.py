@@ -222,3 +222,104 @@ def test_malformed_json_is_ignored_until_next_valid_poll(tmp_path):
 
     assert new_shots == []
     assert archived == []
+
+
+# ---------------------------------------------------------------------------
+# Club-data backfill (the GSPro.db write race the fast poll interval exposes).
+# ---------------------------------------------------------------------------
+class _LateLookup:
+    """A ClubDataLookup stand-in that has no data for the first ``misses``
+    calls, mimicking GSPro.db not having written the DrivingRangeShot row yet."""
+
+    def __init__(self, misses, payload=None):
+        self.misses = misses
+        self.payload = payload or {"clubspeed": 95.0, "smashfactor": 1.42, "club": "7I"}
+        self.calls = 0
+
+    def lookup(self, ball_speed, carry):
+        self.calls += 1
+        if self.calls <= self.misses:
+            return {}
+        return dict(self.payload)
+
+
+def test_shot_arriving_without_club_data_is_backfilled(tmp_path):
+    lookup = _LateLookup(misses=1)
+    updated = []
+    watcher, round_file, *_, new_shots, _archived = _make_watcher(
+        tmp_path, club_lookup=lookup, club_data_retries=3,
+        club_data_retry_interval=0.0, on_shot_updated=updated.append)
+
+    _write(round_file, [_shot("a")])
+    watcher.check_now()                      # baseline
+    time.sleep(0.01)                         # distinct mtime, or the poll no-ops
+    _write(round_file, [_shot("a"), _shot("b")])
+    watcher.check_now()                      # shot b arrives, lookup misses
+
+    assert len(new_shots) == 1
+    assert new_shots[0].get("clubspeed") is None, "should surface immediately, club data pending"
+    assert updated == []
+
+    watcher._retry_club_data()               # GSPro.db has caught up
+
+    assert len(updated) == 1
+    # Patched in place: the dict the UI already holds is the one that changed.
+    assert updated[0] is new_shots[0]
+    assert new_shots[0]["clubspeed"] == 95.0
+    assert new_shots[0]["club"] == "7I"
+    # The real club name from the DB must clear club_index, or a later reload
+    # re-resolves the club back to whatever ClubIndex said.
+    assert new_shots[0]["club_index"] is None
+
+
+def test_backfill_gives_up_after_the_retry_budget(tmp_path):
+    lookup = _LateLookup(misses=99)          # never resolves (e.g. on-course shot)
+    updated = []
+    watcher, round_file, *_, new_shots, _archived = _make_watcher(
+        tmp_path, club_lookup=lookup, club_data_retries=2,
+        club_data_retry_interval=0.0, on_shot_updated=updated.append)
+
+    _write(round_file, [_shot("a")])
+    watcher.check_now()
+    time.sleep(0.01)                         # distinct mtime, or the poll no-ops
+    _write(round_file, [_shot("a"), _shot("b")])
+    watcher.check_now()
+
+    for _ in range(5):
+        watcher._retry_club_data()
+
+    assert updated == []
+    assert watcher._pending_club_data == [], "must stop retrying, not queue forever"
+    assert lookup.calls == 1 + 2, "one live lookup plus exactly the retry budget"
+
+
+def test_shot_that_already_has_club_data_is_never_queued(tmp_path):
+    lookup = _LateLookup(misses=0)           # resolves on the first call
+    watcher, round_file, *_, new_shots, _archived = _make_watcher(
+        tmp_path, club_lookup=lookup, club_data_retries=3,
+        club_data_retry_interval=0.0)
+
+    _write(round_file, [_shot("a")])
+    watcher.check_now()
+    time.sleep(0.01)                         # distinct mtime, or the poll no-ops
+    _write(round_file, [_shot("a"), _shot("b")])
+    watcher.check_now()
+
+    assert new_shots[0]["clubspeed"] == 95.0
+    assert watcher._pending_club_data == []
+
+
+def test_retries_default_off_so_existing_callers_are_unchanged(tmp_path):
+    lookup = _LateLookup(misses=1)
+    watcher, round_file, *_, new_shots, _archived = _make_watcher(
+        tmp_path, club_lookup=lookup)
+
+    _write(round_file, [_shot("a")])
+    watcher.check_now()
+    time.sleep(0.01)                         # distinct mtime, or the poll no-ops
+    _write(round_file, [_shot("a"), _shot("b")])
+    watcher.check_now()
+
+    assert watcher._pending_club_data == []
+    watcher._retry_club_data()
+    assert lookup.calls == 1
