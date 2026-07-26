@@ -194,15 +194,23 @@ shot-number-within-session. `drop_warmup_shots` already uses
 shot 38. Consider stopping there."* That's a respect-my-time insight worth more
 than most charts.
 
-### 7. Sim Index (never "handicap") — **M**
-There is a permanent `---` tile labelled "Est. handicap" on the landing page.
-That's worse than not having it. Either compute it or remove it.
-If computing: WHS-style differential per completed round (`round_summary` already
-gives strokes/par/holes/`finished`), best 8 of last 20, require ≥5 rounds, and
-when unmet say *"5 rounds needed (2 so far)"* — a path, not a dash. Call it **Sim
-Index** and say so in the tooltip: GSPro rounds have gimmes, mulligans and
-whatever wind setting was picked. Presenting it as a USGA index is the most
-misleading thing this app could do.
+### 7. Sim Index (never "handicap") — ✅ **shipped 2026-07-26**
+Shipped as `data/analytics/handicap.py`, on the landing page beside Shot Quality.
+WHS-style differential per completed round, best N of the last 20 on WHS's own
+table, ≥5 eligible rounds, and the shortfall stated as a path ("5 more rounds
+needed, 2 so far") rather than a dash. Marked **verified** once the minimum is
+met.
+
+One deviation from this entry, decided by the product owner: it's called **Sim
+Handicap**, not Sim Index. The guardrail this entry exists to protect is
+enforced by printing "Not a USGA index — sim rounds only" permanently under the
+number rather than by hiding it in a tooltip, which is stronger than what was
+asked for here — a hover can't travel with a number someone quotes to a friend.
+
+Rounds that used a mulligan are excluded outright and marked with an asterisk
+across the on-course dashboard (`data/on_course.py::mulligan_flags`), which
+removes one of the three caveats this entry listed rather than just disclosing
+it. Gimmes and wind settings remain, hence the standing caveat line.
 
 ### 8. Community percentiles instead of a cloud — **M**
 One dot per contributor per club is the statistically correct unit, but users
@@ -218,10 +226,20 @@ with 11 synthetic contributors (see `SEED_SUBMISSIONS.md`). If a user works that
 out while the site presents it as community data, the credibility hit lands on
 everything else. Real or clearly labelled first.
 
-### 9. Explain the Shot Quality number — **S**
+### 9. Explain the Shot Quality number — **S** (still open, but reshaped)
 A 0–100 with no breakdown is a number users learn to ignore by week two.
 `ShotScorer` computes the component scores internally and discards them; return
-them and show "78 — strike 92, launch window 85, dispersion 61" on hover.
+them and show "78 — strike 92, proximity 61" on hover.
+
+Reshaped by the 2026-07-26 scoring rework. The components are now **strike**
+(smash / launch / spin / AoA), **shape** (distance vs your stock number, offline
+vs your spread) and **proximity**, and which of them count depends on the shot's
+context — so a hover breakdown has to name the context too, or a range shot and
+an approach will look like they were scored the same way when they weren't. The
+public explanation of all of this now lives in the website user guide
+(`opengolflab/src/pages/golf-sim-analytics/guide.astro`, "The numbers"); this
+item is what's left to surface *in the app*.
+
 (The carry-direction bug is fixed as of 2026-07-25 — the term is now symmetric
 about the club's stock number for every club except driver.)
 
