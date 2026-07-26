@@ -14,6 +14,12 @@ Three panels:
 
 Only completed (holed-out) holes count toward scoring; a last hole abandoned
 when the round ended is ignored rather than logged as an unrealistic score.
+
+Rounds that used a mulligan are marked with an asterisk here and in the KPI
+tiles. They still count toward every total on this dashboard — they're rounds
+you played — but they're excluded from the Sim Handicap, because the strokes a
+player re-hits are exactly the ones that would have cost them (see
+data.on_course and data.analytics.handicap).
 """
 from __future__ import annotations
 
@@ -46,6 +52,12 @@ _ACCENT = "#20E3B2"
 # render as narrow bars rather than stretching across the whole panel.
 _MAX_ROUND_BARS = 10
 _MIN_ROUND_SLOTS = 6
+
+
+def _mark(row) -> str:
+    """The mulligan asterisk for one round row, or an empty string."""
+    count = pd.to_numeric(row.get("mulligans", 0), errors="coerce")
+    return on_course.MULLIGAN_MARK if pd.notna(count) and count > 0 else ""
 
 
 def render(fig, df, club_colors, font_scale, config, **extra):
@@ -81,10 +93,12 @@ def _kpi_panel(ax, rounds, font_scale, unit=units_mod.YARDS):
     longest = (f"{units_mod.to_display(ld.max(), unit):.0f} {units_mod.dist_suffix_lower(unit)}"
                if not ld.empty else "—")
     # Best round by score per hole (fair across partial rounds), shown as its
-    # raw to-par with hole count.
+    # raw to-par with hole count, asterisked if it took a mulligan to get there.
     per_hole = rounds["to_par"] / rounds["holes"].where(rounds["holes"] > 0)
     best = rounds.loc[per_hole.idxmin()] if per_hole.notna().any() else None
-    best_txt = f"{best['to_par']:+d} · {int(best['holes'])}h" if best is not None else "—"
+    best_txt = "—"
+    if best is not None:
+        best_txt = f"{best['to_par']:+d} · {int(best['holes'])}h{_mark(best)}"
 
     label_fs = max(9, font_scale - 1)
     # Header row: a big rounds count with "rounds played" in small print on the
@@ -103,6 +117,11 @@ def _kpi_panel(ax, rounds, font_scale, unit=units_mod.YARDS):
     ]
     # A gap below the header, then the stat rows spread across the lower panel
     # (all four fit — the last one used to spill below the axes and get clipped).
+    #
+    # A fifth "rounds with a mulligan" row was tried here and dropped: at the
+    # compact four-up panel size these four rows are already close to touching,
+    # and a fifth pushed them into each other. The asterisk on each affected
+    # round bar and the note under the chart already say it.
     ys = [0.60, 0.44, 0.28, 0.12]
     for (label, val), y in zip(rows, ys):
         ax.text(0.0, y, label, color=Colors.TEXT_MUTED, fontsize=label_fs, va="center")
@@ -158,13 +177,14 @@ def _round_scores(ax, rounds, font_scale):
     ax.axhline(0, color=Colors.TEXT_MUTED, linewidth=1.0, zorder=2)
 
     finished = rounds["finished"] if "finished" in rounds.columns else pd.Series(True, index=rounds.index)
+    marks = [_mark(r) for _i, r in rounds.iterrows()]
     span = max(abs(to_par.min()), abs(to_par.max()), 1)
-    for rect, v, was_finished in zip(bars, to_par, finished):
+    for rect, v, was_finished, mark in zip(bars, to_par, finished, marks):
         off = span * 0.04
         # The bar still shows the real to-par accumulated before the round was
         # abandoned (useful context — "+2 through 6" isn't nothing), but the
         # label reads DNF so it's not mistaken for a completed round's score.
-        label = f"{v:+d} (DNF)" if not was_finished else f"{v:+d}"
+        label = f"{v:+d}{mark}" + ("" if was_finished else " (DNF)")
         color = Colors.WARNING if not was_finished else Colors.TEXT_PRIMARY
         ax.text(rect.get_x() + rect.get_width() / 2,
                 v + (off if v >= 0 else -off), label,
@@ -187,6 +207,14 @@ def _round_scores(ax, rounds, font_scale):
     ax.set_title("Full Round Scores (vs par)", fontsize=font_scale, color=Colors.TEXT_PRIMARY, pad=6)
     ax.set_ylabel("Score to par", fontsize=max(10, font_scale - 1))
     style_axes(ax, font_scale - 1, grid="y")
+    if any(marks):
+        # Only when an asterisk is actually on screen — a legend for a mark
+        # nobody can see is just noise. As the x-label rather than free text at
+        # a hand-picked offset, so matplotlib lays it out below the (three-line)
+        # tick labels itself and it can't be clipped when this panel is sharing
+        # the screen with three others.
+        ax.set_xlabel(on_course.MULLIGAN_NOTE, fontsize=max(8, font_scale - 3),
+                      color=Colors.TEXT_MUTED, loc="left")
     # Left-anchor the bars at a constant width: fix the x-range to a minimum
     # number of slots so a couple of rounds render as narrow bars on the left
     # (not stretched across the panel) with room to grow rightward up to the

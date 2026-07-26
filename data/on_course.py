@@ -14,6 +14,15 @@ Scoring therefore uses max(holeshot) per hole (GSPro's own stroke numbering),
 never records-per-hole, which would count every mulligan as an extra stroke.
 The superseded records themselves stay in the shot data: they're real swings
 the golfer made, so the on-course swing views still show them.
+
+That repeated stroke number is also the only evidence a mulligan happened at
+all, and it matters beyond the scorecard arithmetic. A round played with
+mulligans has a score, but not a *comparable* one — the do-overs are exactly
+the strokes that would have hurt. So ``mulligan_flags`` surfaces them,
+``round_summary`` counts them per round, the dashboards mark those rounds with
+an asterisk, and the Sim Handicap (data.analytics.handicap) refuses to use
+them. The rounds are still yours and still shown; they just don't get to set
+your number.
 """
 from __future__ import annotations
 
@@ -33,6 +42,10 @@ HOLED_OUT_YDS = 1.0
 
 # Scorecard buckets, best → worst, by strokes relative to par.
 SCORE_BUCKETS = ["Eagle+", "Birdie", "Par", "Bogey", "Double+"]
+
+# What the dashboards append to a round that used at least one mulligan.
+MULLIGAN_MARK = "*"
+MULLIGAN_NOTE = "* round used a mulligan — excluded from your Sim Handicap"
 
 
 def practice_view(df: pd.DataFrame, exclude_on_course: bool = True) -> pd.DataFrame:
@@ -119,11 +132,38 @@ def humanize_course(raw) -> str:
     return text.title() if text else "Unknown Course"
 
 
+def mulligan_flags(df: pd.DataFrame) -> pd.Series:
+    """Boolean per row: is this record a superseded re-hit (a mulligan)?
+
+    A re-hit repeats its HoleShot, so a (session, hole, stroke number) group
+    holding more than one record is a stroke that was played more than once.
+    The LAST record of such a group is the attempt that counted — it's the one
+    the following stroke's distance-to-pin continues from — so everything
+    before it is flagged.
+
+    False everywhere when the round predates the holeshot column, which is the
+    honest answer rather than a guess: without stroke numbers there is no
+    signal in the data that distinguishes a mulligan from a normal stroke.
+    """
+    flags = pd.Series(False, index=df.index)
+    needed = {"session_id", "hole", "holeshot", "round_type"}
+    if df.empty or not needed <= set(df.columns):
+        return flags
+    oc = df[df["round_type"].astype(str) == ON_COURSE]
+    holeshot = pd.to_numeric(oc["holeshot"], errors="coerce")
+    oc = oc[holeshot.notna()]
+    if oc.empty:
+        return flags
+    superseded = oc.duplicated(subset=["session_id", "hole", "holeshot"], keep="last")
+    flags.loc[superseded.index] = superseded
+    return flags
+
+
 def hole_summary(df: pd.DataFrame) -> pd.DataFrame:
     """Per (session_id, hole) scorecard row for on-course play: strokes, par,
-    whether the hole was completed (holed out), and to_par. Empty frame when
-    the needed columns are absent."""
-    cols = ["session_id", "hole", "strokes", "par", "holed", "to_par"]
+    whether the hole was completed (holed out), to_par, and how many mulligans
+    were taken on it. Empty frame when the needed columns are absent."""
+    cols = ["session_id", "hole", "strokes", "par", "holed", "to_par", "mulligans"]
     oc = on_course_view(df)
     if oc.empty or not _HOLE_COLS <= set(oc.columns):
         return pd.DataFrame(columns=cols)
@@ -144,7 +184,11 @@ def hole_summary(df: pd.DataFrame) -> pd.DataFrame:
     else:
         holed = pd.Series(True, index=strokes.index, name="holed")
 
-    out = pd.concat([strokes, par, holed], axis=1).reset_index()
+    mull = (mulligan_flags(df).reindex(oc.index, fill_value=False)
+            .groupby([oc["session_id"], oc["hole"]], sort=False).sum().rename("mulligans"))
+
+    out = pd.concat([strokes, par, holed, mull], axis=1).reset_index()
+    out["mulligans"] = out["mulligans"].fillna(0).astype(int)
     out["to_par"] = out["strokes"] - out["par"]
     # A hole also counts as completed if a LATER hole in the same round was
     # started — you can't tee off hole N+1 without having finished hole N. This
@@ -161,17 +205,23 @@ def hole_summary(df: pd.DataFrame) -> pd.DataFrame:
 def round_summary(df: pd.DataFrame) -> pd.DataFrame:
     """Per-round scorecard, oldest → newest. One row per on-course session with
     the course played, holes completed, strokes, par, to_par, whether the
-    round was finished, longest drive, and a count per score bucket. Only
-    completed (holed) holes with a known par count toward scoring.
+    round was finished, longest drive, how many mulligans were taken, and a
+    count per score bucket. Only completed (holed) holes with a known par
+    count toward scoring.
 
     ``finished`` is False when the LAST hole the round attempted (which may
     be past the scored holes) was never holed out — i.e. play stopped
     mid-hole. A deliberate short round that holes out its last hole (e.g. a
     quick 3-hole loop) is NOT flagged; only an abandoned last hole is, since
     there's no reliable signal here for the course's intended hole count.
+
+    ``mulligans`` counts every hole of the round, including ones that didn't
+    make the scorecard: a mulligan taken on an abandoned last hole still means
+    the round was played with do-overs available, which is the thing the
+    asterisk and the Sim Handicap exclusion actually care about.
     """
     cols = (["session_id", "date", "course", "holes", "strokes", "par", "to_par",
-            "finished", "longest_drive"] + SCORE_BUCKETS)
+            "finished", "longest_drive", "mulligans"] + SCORE_BUCKETS)
     all_holes = hole_summary(df)
     if all_holes.empty:
         return pd.DataFrame(columns=cols)
@@ -194,6 +244,7 @@ def round_summary(df: pd.DataFrame) -> pd.DataFrame:
         sid: bool(sub.loc[sub["hole"].idxmax(), "holed"])
         for sid, sub in all_holes.groupby("session_id")
     }
+    mulligans_by_sid = all_holes.groupby("session_id")["mulligans"].sum()
 
     total_col = "totaldistance" if "totaldistance" in oc.columns else (
         "carry" if "carry" in oc.columns else None)
@@ -217,6 +268,7 @@ def round_summary(df: pd.DataFrame) -> pd.DataFrame:
             "to_par": int(sub["strokes"].sum() - sub["par"].sum()),
             "finished": finished_by_sid.get(sid, True),
             "longest_drive": drive,
+            "mulligans": int(mulligans_by_sid.get(sid, 0)),
         }
         for b in SCORE_BUCKETS:
             row[b] = int(buckets.get(b, 0))
