@@ -274,3 +274,60 @@ def test_round_summary_course_defaults_to_unknown_without_data():
     df = _hole("r1", 1, 4, [410, 150, 20, 0])
     row = on_course.round_summary(df).iloc[0]
     assert row["course"] == "Unknown Course"
+
+
+# --- mulligans -----------------------------------------------------------------
+
+def test_mulligan_flags_marks_every_attempt_but_the_last():
+    # Real shape (2026-07-19 Highlands, hole 17): stroke 1 was played three
+    # times. The last attempt is the one the following stroke continues from,
+    # so the two before it are the mulligans.
+    df = _hole("r1", 17, 5, [281, 333, 260, 47, 2.2, 0])
+    df["holeshot"] = [1, 1, 1, 2, 3, 4]
+    flags = on_course.mulligan_flags(df)
+    assert list(flags) == [True, True, False, False, False, False]
+
+
+def test_mulligan_flags_ignores_practice_rows():
+    df = _hole("r1", 0, 4, [392, 392, 392])
+    df["round_type"] = "practice"
+    df["holeshot"] = [1, 1, 1]
+    assert not on_course.mulligan_flags(df).any()
+
+
+def test_mulligan_flags_false_without_stroke_numbers():
+    # No holeshot column means no signal at all — the honest answer is "none
+    # detected", not a guess from record counts.
+    df = _hole("old", 1, 4, [410, 150, 20, 0])
+    assert not on_course.mulligan_flags(df).any()
+
+
+def test_mulligan_flags_empty_frame():
+    assert on_course.mulligan_flags(pd.DataFrame()).empty
+
+
+def test_hole_and_round_summary_count_mulligans():
+    df = _hole("r1", 1, 4, [410, 150, 150, 20, 0])
+    df["holeshot"] = [1, 2, 2, 3, 4]
+    assert int(on_course.hole_summary(df).loc[0, "mulligans"]) == 1
+    assert int(on_course.round_summary(df).iloc[0]["mulligans"]) == 1
+
+
+def test_round_summary_reports_zero_mulligans_for_a_clean_round():
+    df = _hole("r1", 1, 4, [410, 150, 20, 0])
+    df["holeshot"] = [1, 2, 3, 4]
+    assert int(on_course.round_summary(df).iloc[0]["mulligans"]) == 0
+
+
+def test_round_mulligan_count_includes_unscored_holes():
+    # A mulligan on an abandoned last hole still means the round was played
+    # with do-overs available, which is what the asterisk is about — even
+    # though that hole never reaches the scorecard.
+    df = pd.concat([
+        _hole("r1", 1, 4, [410, 150, 20, 0]),
+        _hole("r1", 2, 3, [180, 180, 60]),  # never holed out
+    ], ignore_index=True)
+    df["holeshot"] = [1, 2, 3, 4, 1, 1, 2]
+    row = on_course.round_summary(df).iloc[0]
+    assert row["holes"] == 1           # only the completed hole is scored
+    assert int(row["mulligans"]) == 1  # but the mulligan is still counted

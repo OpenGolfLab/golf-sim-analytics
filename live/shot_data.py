@@ -101,7 +101,18 @@ def flatten_shot(raw_shot: dict, club_lookup=None) -> dict:
         # (see data.on_course.exclude_putts).
         "holeshot": raw_shot.get("HoleShot"),
         "shot_result": raw_shot.get("ShotResult"),
+        # Written by GSPro AFTER the shot resolves, so on course this is the
+        # shot's proximity to the flag, not the distance it was played from.
         "distancetopin": raw_shot.get("DistanceToPin"),
+        # Same raw field, opposite meaning, which is why it gets its own
+        # column. On the practice range the ball is replaced on the tee after
+        # every shot, so the play position never moves and GSPro keeps
+        # reporting the unchanged tee-to-target distance — i.e. how far away
+        # the target the player selected is. That's the only signal GSPro
+        # exposes for the range target, and the Shot Quality score needs it to
+        # score proximity on the range (see data.analytics.scoring).
+        "target_distance": (raw_shot.get("DistanceToPin")
+                            if raw_shot.get("RoundID") in (None, -1) else None),
         "shot_id": raw_shot.get("ShotID"),
         # GSPro's internal course slug for on-course rounds (e.g.
         # "paynes_valley_gsp"); None for practice-range shots, which don't

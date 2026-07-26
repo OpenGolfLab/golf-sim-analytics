@@ -41,3 +41,13 @@ SPIN_RATE_ALIASES = [
 # produced by the face-to-path relationship.
 START_DIR_ALIASES = ["hla", "launchdirection", "launch_direction", "horizontal_launch", "azimuth"]
 SPIN_AXIS_ALIASES = ["rawspinaxis", "spinaxis", "spin_axis"]
+# Where the ball finished relative to the hole, in yards. On-course only:
+# GSPro writes this AFTER the shot resolves, so it is the shot's proximity,
+# not the distance it was played from (live/shot_data.py's note on the field).
+DISTANCE_TO_PIN_ALIASES = ["distancetopin", "distance_to_pin", "proximity"]
+# Practice-range only: how far away the target the player selected in GSPro
+# is, in yards. Same raw field as distancetopin, opposite meaning — on the
+# range the ball is replaced on the tee after every shot, so GSPro keeps
+# reporting the unchanged tee-to-target distance. See
+# data.analytics.scoring's "Targets on the range" note.
+TARGET_DISTANCE_ALIASES = ["target_distance", "targetdistance"]

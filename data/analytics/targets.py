@@ -25,6 +25,9 @@ from config import normalize_club_name, optimal_launch_spin
 # "how wide is good" knob). Kept here so all three metrics share one place.
 _LAUNCH_TOL_FRAC = 0.20   # ±20% of optimal launch angle
 _SPIN_TOL_FRAC = 0.18     # ±18% of optimal spin
+# Smash is a much tighter number than launch or spin — the whole usable range
+# for a driver is about 1.35–1.50 — so its band is proportionally narrower.
+_SMASH_TOL_FRAC = 0.045   # ±4.5% of optimal smash factor
 
 # Heuristic per-club angle-of-attack windows (degrees), (low, high). NOT from a
 # tour dataset — attack angle isn't in REFERENCE_PROFILES. Driver rewards a
@@ -46,6 +49,10 @@ _AOA_WINDOWS: dict[str, tuple[float, float]] = {
 # Physical clamp so a widened band can never imply a nonsensical target.
 _LAUNCH_BOUNDS = (5.0, 35.0)
 _SPIN_BOUNDS = (1500.0, 12000.0)
+# 1.5 is the COR limit a conforming driver face can't exceed; anything above it
+# is a measurement artifact, not a better strike. The floor is a whiff-ish
+# bottom so the band stays meaningful for the wedges (tour PW is ~1.23).
+_SMASH_BOUNDS = (0.80, 1.50)
 
 
 @dataclass(frozen=True)
@@ -58,6 +65,17 @@ class ClubTargets:
     spin_optimal: float
     spin_window: tuple[float, float]
     aoa_window: tuple[float, float]
+    # Smash factor (ball speed / club speed). Unlike launch and spin this does
+    # NOT scale with the player's clubhead speed — smash is an efficiency
+    # ratio, and a 95mph driver swing and a 113mph one are both trying to hit
+    # the same ~1.48. So it comes straight off the club's tour baseline.
+    #
+    # The band is deliberately two-sided even though "more smash" sounds
+    # strictly better: above the club's number means the ball came off the
+    # face hotter than that loft can produce, which in practice is a thin
+    # strike low on the face (or a mislabeled club), not a good one.
+    smash_optimal: float
+    smash_window: tuple[float, float]
 
 
 def _band(center: float, frac: float, bounds: tuple[float, float]) -> tuple[float, float]:
@@ -80,13 +98,28 @@ def _aoa_window(club: str) -> tuple[float, float]:
     return _AOA_WINDOWS[nearest]
 
 
+def _smash_optimal(club: str) -> float:
+    """The club's tour smash factor, straight from the published ball-speed /
+    club-speed pair in ``REFERENCE_PROFILES["PGA Tour"]`` (TrackMan Tour
+    Averages) — driver ~1.48, 7-iron ~1.33, PW ~1.23. Clubs with no tour row
+    borrow their nearest bag neighbour, same as every other target here."""
+    from config import _tour_baseline  # local import: config is heavy at load
+
+    base = _tour_baseline(club)
+    if not base.club_speed or not base.ball_speed:
+        return 1.35  # unreachable with today's table; a mid-iron-ish default
+    return base.ball_speed / base.club_speed
+
+
 def get_targets(club, speed: float = 100.0) -> ClubTargets:
-    """Optimal launch/spin/AoA windows for ``club`` at the player's clubhead
-    ``speed``. Launch and spin centers come from ``config.optimal_launch_spin``
-    (speed-scaled off the tour baseline); the bands and AoA are added here.
+    """Optimal launch/spin/AoA/smash windows for ``club`` at the player's
+    clubhead ``speed``. Launch and spin centers come from
+    ``config.optimal_launch_spin`` (speed-scaled off the tour baseline); the
+    bands, AoA and smash are added here.
     """
     canon = normalize_club_name(club)
     launch, spin = optimal_launch_spin(canon, speed)
+    smash = _smash_optimal(canon)
     return ClubTargets(
         club=canon,
         launch_optimal=launch,
@@ -94,4 +127,6 @@ def get_targets(club, speed: float = 100.0) -> ClubTargets:
         spin_optimal=spin,
         spin_window=_band(spin, _SPIN_TOL_FRAC, _SPIN_BOUNDS),
         aoa_window=_aoa_window(canon),
+        smash_optimal=smash,
+        smash_window=_band(smash, _SMASH_TOL_FRAC, _SMASH_BOUNDS),
     )

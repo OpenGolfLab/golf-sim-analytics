@@ -16,8 +16,8 @@ same pattern as the chart panels' autosize binding in app_window).
 Layout (data present):        Layout (no data yet):
   hero title                     hero title
   [4 stat tiles]                 [single hint card]
-  [last session | trends]
-  [focus areas  | rhythm ]
+  [4 record tiles]
+  [shot quality | sim handicap]
 
 Dashboards are launched from the sidebar checkboxes and the top-bar "Go
 Live" button, so the landing page is a read-only summary — no navigation
@@ -225,6 +225,46 @@ def build_home_page(parent, stats: HomeStats, image_path,
                                text="Not enough sessions for a trend yet",
                                font=_font("body"), fill=Colors.TEXT_MUTED)
 
+    def _handicap_panel(blurred, box):
+        """The Sim Handicap: the number, whether it's verified, and — when
+        there isn't one yet — how many more clean rounds it needs.
+
+        The caveat is printed rather than tucked into a hover tooltip. This is
+        a number people will quote to other golfers, and "it's not a USGA
+        index" has to travel with it, which it can't do from behind a hover.
+        """
+        x0, y0, x1, y1 = box
+        h_data = records.handicap
+        _card(blurred, box, "Sim handicap", Colors.ACCENT)
+        cx = x0 + sc(22)
+        value = h_data.label
+        verified = h_data.verified
+        color = Colors.SUCCESS if verified else Colors.TEXT_MUTED
+
+        # Sized to the card, like the record tiles: "+2.1" and "---" are
+        # narrow, but a plus-handicap with two digits still has to fit.
+        size = sc(FONT_SCALE["display"])
+        inner = (x1 - x0) - sc(90)
+        while size > sc(FONT_SCALE["heading"]) and tkfont.Font(
+                family=FONT_FAMILY, size=size, weight="bold").measure(value) > inner:
+            size -= 1
+        cy = (y0 + y1) / 2 - sc(2)
+        canvas.create_text(cx, cy, text=value, anchor="w",
+                           font=(FONT_FAMILY, size, "bold"), fill=color)
+
+        if verified:
+            big = tkfont.Font(family=FONT_FAMILY, size=size, weight="bold")
+            canvas.create_text(cx + big.measure(value) + sc(10), cy + sc(6),
+                               text="✓ Verified", anchor="w",
+                               font=_font("caption", "bold"), fill=Colors.SUCCESS)
+
+        canvas.create_text(cx, y1 - sc(42), text=h_data.status, anchor="w",
+                           font=_font("caption"), fill=Colors.TEXT_MUTED,
+                           width=(x1 - x0) - sc(40))
+        canvas.create_text(cx, y1 - sc(20), text="Not a USGA index — sim rounds only",
+                           anchor="w", font=_font("caption"), fill=Colors.TEXT_MUTED,
+                           width=(x1 - x0) - sc(40))
+
     def _redraw(w, h):
         canvas.delete("all")
         state["photos"] = []
@@ -290,14 +330,11 @@ def build_home_page(parent, stats: HomeStats, image_path,
         # Four tiles, matching row 1, so both rows sit on the same four-column
         # grid instead of a 4-over-5 split whose internal edges never lined up.
         #
-        # The fifth tile was "Est. handicap", and it could only ever read "---":
-        # PlayerRecords.handicap is a hardcoded default that nothing assigns to,
-        # because handicap tracking is deferred. A permanently empty tile in the
-        # most valuable space on the landing page reads as broken software, so
-        # it's better absent until there's a number to put in it. The field is
-        # left on PlayerRecords for whatever implements it — see the Sim Index
-        # item in docs/ROADMAP.md, which also covers why it must not be called a
-        # handicap.
+        # The handicap deliberately isn't a fifth tile here. It now has a real
+        # number behind it (data.analytics.handicap), but it also needs a
+        # verified badge, a progress line while it's still building, and a
+        # standing caveat that it is not a USGA index — none of which fit in a
+        # tile this size. It shares row 3 with Shot Quality instead.
         rec_w = (content_w - 3 * gap) / 4
         record_tiles = [
             ("Longest drive", records.longest_drive, Colors.SUCCESS),
@@ -310,8 +347,12 @@ def build_home_page(parent, stats: HomeStats, image_path,
             _tile(blurred, (tx, y, int(tx + rec_w), y + rec_h), label, value, color)
         y += rec_h + gap
 
-        # Row 3 — Shot Quality score + trend line.
-        _shot_quality_panel(blurred, (x0, y, x0 + content_w, y + sq_h))
+        # Row 3 — Shot Quality score + trend line, alongside the Sim Handicap.
+        # The split is uneven on purpose: the quality panel carries a sparkline
+        # that needs the width, the handicap panel carries three short lines.
+        sq_w = int((content_w - gap) * 0.66)
+        _shot_quality_panel(blurred, (x0, y, x0 + sq_w, y + sq_h))
+        _handicap_panel(blurred, (x0 + sq_w + gap, y, x0 + content_w, y + sq_h))
 
     def _on_configure(event):
         if event.width < 60 or event.height < 60:

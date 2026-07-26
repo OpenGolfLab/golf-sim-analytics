@@ -1,6 +1,10 @@
 """Shot Quality — the per-shot 0-100 quality score (data.analytics.scoring)
 averaged per session and plotted over time, so improving contact/consistency
 shows up as a rising line.
+
+What the score measures shifts with what the shot was trying to do — strike
+plus proximity when there was a target to hit, strike plus repeatability when
+there wasn't. The scorer decides that per shot; this chart just averages it.
 """
 from __future__ import annotations
 
@@ -29,7 +33,8 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     scored = df.assign(_score=ShotScorer().score(df)).dropna(subset=["_score"])
     if scored.empty:
         show_message(fig, "Not enough data to score shots", font_scale,
-                     hint="Scoring needs carry/launch/spin for each club.")
+                     hint="Scoring needs contact data (smash, launch, spin) or "
+                          "carry and offline for each club.")
         return
 
     if "session_id" in scored.columns:
@@ -65,6 +70,6 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     ax.set_xticklabels(labels, rotation=45, ha="right")
     ax.set_ylabel("Quality Score (0–100)", fontsize=font_scale)
     ax.set_xlabel("Session", fontsize=font_scale)
-    ax.set_title("How well are you striking the ball?", fontsize=font_scale - 1,
+    ax.set_title("How well are your shots doing their job?", fontsize=font_scale - 1,
                  color=Colors.TEXT_MUTED, loc="left", pad=10)
     style_axes(ax, font_scale, grid="y")
