@@ -22,7 +22,7 @@ from data.columns import (
     BALL_SPEED_ALIASES, CARRY_ALIASES, CLUB_SPEED_ALIASES, OFFLINE_ALIASES,
     SMASH_FACTOR_ALIASES, TOTAL_ALIASES, find_col,
 )
-from data.analytics import ShotScorer
+from data.analytics import ShotScorer, SimHandicap, compute_sim_handicap
 from data.io import extract_date_from_filename
 from data.physics import theoretical_max_drive_yards
 from config import get_club_rank, normalize_club_name, resolve_club_index
@@ -118,6 +118,8 @@ def load_master_dataframe(data_dir: Path) -> pd.DataFrame:
     else:
         df["round_type"] = df["round_type"].fillna("practice")
 
+    df = _backfill_range_targets(df)
+
     if "session_id" in df.columns and "session_date" in df.columns:
         # Some sessions archived under older code versions have a
         # session_date that fell back to file ctime (off by several hours
@@ -156,6 +158,55 @@ def load_master_dataframe(data_dir: Path) -> pd.DataFrame:
     return df
 
 
+# A session's distancetopin readings count as a range target when the same
+# value repeats at least this often on average (unique values / shots below the
+# threshold). See _backfill_range_targets.
+_TARGET_REPEAT_RATIO = 0.35
+
+
+def _backfill_range_targets(df: pd.DataFrame) -> pd.DataFrame:
+    """Fill in ``target_distance`` for practice sessions archived before that
+    column existed, so older data starts scoring on target proximity without a
+    migration step — the same self-healing pattern as the club-name and
+    session-date repairs above.
+
+    ``distancetopin`` is the source, but only for sessions where it actually
+    carries a range target, which needs a check rather than a blanket copy.
+    GSPro writes that field after a shot resolves, and on the practice range
+    the ball is replaced on the tee, so the play position never moves and the
+    value stays pinned at the tee-to-target distance (live/shot_data.py). Some
+    CSV-sourced sessions in real histories instead carry a genuine per-shot
+    proximity there, and copying that in would score every one of those shots
+    against a "target" that is really just where the previous ball finished.
+
+    The two are easy to tell apart from their own shape: a target repeats
+    across the shots hit at it, while a proximity is a different float every
+    shot. So a session qualifies only when its readings repeat.
+    """
+    if "distancetopin" not in df.columns or "session_id" not in df.columns:
+        return df
+    if "target_distance" in df.columns and df["target_distance"].notna().any():
+        return df
+
+    df = df.copy()
+    # Older CSV-sourced archives kept this column as GSPro's localized text
+    # ("135.5 yds"), so it can't be assumed numeric.
+    dtp = pd.to_numeric(
+        df["distancetopin"].astype(str).str.replace(r"[^\d\.\-]", "", regex=True),
+        errors="coerce")
+    practice = (df["round_type"].astype(str) != "on_course") & dtp.notna() & (dtp > 0)
+    if "target_distance" not in df.columns:
+        df["target_distance"] = np.nan
+    if not practice.any():
+        return df
+
+    rounded = dtp.round().where(practice)
+    per_session = rounded.groupby(df["session_id"], sort=False)
+    repeats = (per_session.transform("nunique") / per_session.transform("count"))
+    df.loc[practice & (repeats <= _TARGET_REPEAT_RATIO), "target_distance"] = dtp
+    return df
+
+
 def unique_clubs(df: pd.DataFrame) -> list[str]:
     if "club" not in df.columns:
         return []
@@ -163,26 +214,27 @@ def unique_clubs(df: pd.DataFrame) -> list[str]:
 
 
 class PlayerRecords:
-    """Longest drive / max club speed / handicap / theoretical max drive
-    summary shown in the sidebar."""
+    """Longest drive / max club speed / Sim Handicap / theoretical max drive
+    summary shown on the landing page."""
 
     def __init__(self, longest_drive: str = "--- Yds", max_club_speed: str = "--- MPH",
-                 handicap: str = "---", theoretical_max_drive: str = "--- Yds",
-                 max_ball_speed: str = "--- MPH"):
-        # handicap stays "---" until handicap tracking lands (deferred — see
-        # FEATURE_ROADMAP_PROMPT.md); nothing computes it yet, so showing a
-        # number here would be fabricated data on the landing page.
+                 theoretical_max_drive: str = "--- Yds", max_ball_speed: str = "--- MPH",
+                 handicap: "SimHandicap | None" = None):
         self.longest_drive = longest_drive
         self.max_club_speed = max_club_speed
-        self.handicap = handicap
         self.theoretical_max_drive = theoretical_max_drive
         self.max_ball_speed = max_ball_speed
+        # The full SimHandicap, not just its label: the landing page shows the
+        # number, whether it's verified, and the progress line when it isn't
+        # yet, and all three come from the same computation.
+        self.handicap = handicap or SimHandicap()
 
 
 def compute_player_records(df: pd.DataFrame, unit: str = "Yards") -> PlayerRecords:
     from data import units as units_mod
     if df.empty:
         return PlayerRecords()
+    handicap = compute_sim_handicap(df)
 
     dist_u = units_mod.dist_suffix(unit)
     total_col = find_col(df, ["total", "totaldistance"]) or find_col(df, CARRY_ALIASES)
@@ -210,7 +262,8 @@ def compute_player_records(df: pd.DataFrame, unit: str = "Yards") -> PlayerRecor
                 r_theoretical_max = f"{units_mod.to_display(yards, unit):.0f} {dist_u}"
 
     return PlayerRecords(longest_drive=r_drive, max_club_speed=r_speed,
-                          theoretical_max_drive=r_theoretical_max, max_ball_speed=r_ball)
+                          theoretical_max_drive=r_theoretical_max, max_ball_speed=r_ball,
+                          handicap=handicap)
 
 
 @dataclass
