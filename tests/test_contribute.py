@@ -180,6 +180,48 @@ def test_invalid_age_band_normalizes_to_unknown(tmp_path):
     assert manifest["self_report"]["age_band"] == "unknown"
 
 
+# ------------------------------------------------------------- declared ball
+def test_normalize_ball_model_keeps_valid_drops_invalid():
+    ok = contribute.normalize_ball_model
+    assert ok("Pro V1") == "Pro V1"
+    assert ok("  TP5x  ") == "TP5x"          # trimmed
+    assert ok("Q-Star  Tour") == "Q-Star Tour"  # runs of whitespace collapsed
+    assert ok("<script>") == ""              # charset
+    assert ok("") == "" and ok(None) == ""
+
+
+def test_declared_ball_fills_in_when_the_export_has_no_ball_column(tmp_path):
+    contribute.record_consent(str(tmp_path), True)
+    _manifest, out = contribute._prepare(
+        _df(), app_dir=str(tmp_path), handicap_band="unknown", launch_monitor="",
+        app_version="t", round_dp=1, ball_model="Pro V1")
+    assert set(out["ball_model"]) == {"Pro V1"}
+
+
+def test_per_shot_ball_beats_the_declared_one(tmp_path):
+    """The recorded ball is what was actually hit; the profile only fills gaps."""
+    contribute.record_consent(str(tmp_path), True)
+    df = _df()
+    df["ball"] = ["Chrome Soft", "", None, "Chrome Soft", ""]
+
+    _manifest, out = contribute._prepare(
+        df, app_dir=str(tmp_path), handicap_band="unknown", launch_monitor="",
+        app_version="t", round_dp=1, ball_model="Pro V1")
+
+    # The putt (row 3) is dropped; of the four contributed shots, the two that
+    # named a ball keep it and the two blanks — including the NaN that becomes
+    # the string "nan" — take the declared one.
+    assert sorted(out["ball_model"]) == ["Chrome Soft", "Chrome Soft", "Pro V1", "Pro V1"]
+
+
+def test_no_declared_ball_leaves_the_column_alone(tmp_path):
+    contribute.record_consent(str(tmp_path), True)
+    _manifest, out = contribute._prepare(
+        _df(), app_dir=str(tmp_path), handicap_band="unknown", launch_monitor="",
+        app_version="t", round_dp=1)
+    assert "ball_model" not in out.columns
+
+
 # ------------------------------------------------------- v1.5: provenance
 def test_manifest_carries_provenance_split(tmp_path):
     import pandas as pd

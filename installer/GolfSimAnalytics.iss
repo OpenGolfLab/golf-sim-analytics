@@ -76,7 +76,16 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; next to the exe, so if dist\ is ever dirty from a test run, packaging
 ; those paths would overwrite every user's settings and inject the
 ; developer's sessions into their data on upgrade. Never ship them.
-Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "raw_csvs\*,parquet_data\*,logs\*,settings.json"
+;
+; .contributor_id is the worst of them and the least obvious, because it
+; isn't visible in a folder listing: it's the locked, write-once id the
+; community aggregate de-duplicates on (see contribute.py). Shipping one
+; would hand every installation the SAME identity -- the whole community
+; would aggregate as a single golfer, and no user could ever be issued a
+; new id, because a valid id is never overwritten. .contribute_consent
+; goes with it: consent is something each user gives, never something an
+; installer can arrive having already granted on their behalf.
+Source: "..\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "raw_csvs\*,parquet_data\*,logs\*,settings.json,.contributor_id,.contribute_consent"
 
 [Icons]
 ; No Tasks page to opt into these (it was the last remaining wizard

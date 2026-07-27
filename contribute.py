@@ -14,7 +14,7 @@ Reuses the app's own column-alias resolution (data.columns) so it maps correctly
 regardless of how the launch monitor spelled each field.
 """
 from __future__ import annotations
-import os, re, io, json, uuid, hashlib, datetime, zipfile
+import os, re, io, sys, json, uuid, hashlib, datetime, zipfile
 import urllib.request, urllib.error
 import pandas as pd
 
@@ -81,6 +81,21 @@ def normalize_equipment(raw: dict | None) -> dict:
         if brand or model:
             out[slot] = {"brand": brand, "model": model}
     return out
+
+
+# The ball you play. Free text, validated exactly like an equipment model
+# above, because ball naming has no useful allowlist — "Pro V1", "TP5x", "AVX",
+# "Q-Star Tour", plus every store brand. Unlike the rest of the profile this
+# one has a per-shot counterpart: some exports name the ball on each row, and
+# that always wins (see _prepare). The declared value only fills the gap, which
+# for most GSPro CSVs is every row, since they carry no ball column at all.
+BALL_MODEL_MAX = _EQUIP_MODEL_MAX
+
+
+def normalize_ball_model(raw: str) -> str:
+    """Clean a declared ball name, or "" if it isn't usable."""
+    name = " ".join(str(raw or "").split())[:BALL_MODEL_MAX]
+    return name if name and _EQUIP_MODEL_RE.match(name) else ""
 
 # ---------------------------------------------------------------------------
 # Launch-monitor / instrument metadata (manifest v1.1).
@@ -231,15 +246,140 @@ REQUIRED = ["ball_speed", "launch_angle", "back_spin", "carry"]  # + club
 
 
 # ---------------------------------------------------------------- consent / id
+#
+# The contributor id is the one value in a bundle that must never change.
+#
+# It is what the aggregator de-duplicates on: every bundle a golfer has ever
+# sent collapses onto a single identity, so re-sending the same rounds updates
+# that golfer's row rather than adding a second, equally-weighted "golfer" to
+# the community pool. A contributor is free to publish under any display name
+# they like, and to change it whenever — the id underneath stays put, and that
+# is what stops one person from counting as several.
+#
+# So the id is:
+#   * write-once — an existing, valid id is never regenerated or overwritten;
+#   * mirrored — held both next to the app and in the per-user application-data
+#     folder, so wiping the app folder or reinstalling somewhere else still
+#     resolves to the same id (whichever copy survived reseeds the other);
+#   * not a setting — deliberately absent from settings.json, which the user
+#     edits by hand and the app rewrites wholesale.
+#
+# Anything unparseable — a truncated write, a hand-edited file, an empty file
+# from a full disk — is treated as ABSENT rather than trusted. The old code
+# returned whatever the file held, so an empty file put an empty
+# contributor_uuid on the wire, which would merge every broken install into a
+# single server-side "contributor": the exact miscount this machinery exists
+# to prevent.
+# ---------------------------------------------------------------------------
+_ID_FILENAME = ".contributor_id"
+
+# Points the per-user mirror somewhere else. Only the test suite sets it — a
+# test run must never read, and must never seed, the real per-user id.
+_ID_DIR_ENV = "GOLFSIMANALYTICS_ID_DIR"
+
+
+def _is_valid_id(raw) -> bool:
+    """True only for something that actually parses as a UUID."""
+    try:
+        uuid.UUID(str(raw).strip())
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return True
+
+
+def _read_id(path: str) -> str | None:
+    """The valid id stored at ``path``, or None if it's missing or unusable."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.read().strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    return raw if _is_valid_id(raw) else None
+
+
+def _write_id(path: str, value: str) -> bool:
+    """Write an id atomically (temp file + replace) so a crash or a full disk
+    leaves the previous copy intact instead of a half-written one. Returns
+    whether it landed — a failure is never fatal, because the other copy (or
+    the next launch) still resolves the same id."""
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(value)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
+
+
+# The mirror deliberately does NOT live under a GolfSimAnalytics-named folder:
+# the installer's target IS %LocalAppData%\GolfSimAnalytics (see
+# installer/GolfSimAnalytics.iss — DefaultDirName), so that folder is the app
+# folder, and a mirror inside it would be destroyed by the very uninstall it
+# exists to survive. It's an OpenGolfLab *contributor* id rather than an app id
+# anyway, so it's filed under the thing it identifies you to.
+_MIRROR_DIRNAME = "OpenGolfLab"
+
+
+def _user_id_path() -> str | None:
+    """The per-user mirror of the contributor id, outside the app folder.
+
+    Windows: %LOCALAPPDATA%\\OpenGolfLab\\contributor_id — LOCAL on purpose,
+    not roaming: the id belongs to this person on this machine and shouldn't be
+    synced onto a second one as a side effect of domain roaming.
+    Elsewhere: $XDG_DATA_HOME (or ~/.local/share)/OpenGolfLab/.
+
+    Returns None when there's nowhere sensible to put it, in which case the
+    app-folder copy is simply the only one.
+    """
+    override = os.environ.get(_ID_DIR_ENV)
+    if override:
+        return os.path.join(override, "contributor_id")
+    if sys.platform == "win32":
+        root = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+    else:
+        root = (os.environ.get("XDG_DATA_HOME")
+                or os.path.join(os.path.expanduser("~"), ".local", "share"))
+    if not root or not os.path.isdir(root):
+        return None
+    return os.path.join(root, _MIRROR_DIRNAME, "contributor_id")
+
+
+def contributor_id_paths(app_dir: str) -> list[str]:
+    """Every location the contributor id is kept, in precedence order.
+
+    The app folder comes first: it's where the id has always lived, so an
+    existing install keeps the id it has been contributing under even if the
+    per-user mirror somehow holds a different one.
+    """
+    paths = [os.path.join(app_dir, _ID_FILENAME)]
+    mirror = _user_id_path()
+    if mirror:
+        paths.append(mirror)
+    return paths
+
+
 def get_contributor_uuid(app_dir: str) -> str:
-    """Random, persisted, non-identifying id used only to de-duplicate."""
-    path = os.path.join(app_dir, ".contributor_id")
-    if os.path.exists(path):
-        return open(path).read().strip()
-    u = str(uuid.uuid4())
-    with open(path, "w") as f:
-        f.write(u)
-    return u
+    """The locked, random, non-identifying id used only to de-duplicate.
+
+    The first valid id found in any known location wins, and is copied into
+    any location that has lost or corrupted its copy. A location that already
+    holds a valid id is never rewritten — write-once means write-once, and two
+    installs sharing a machine must not fight over the mirror. A new id is
+    minted only when no valid copy exists anywhere, i.e. on a genuine first run.
+    """
+    paths = contributor_id_paths(app_dir)
+    stored = [_read_id(p) for p in paths]
+    locked = next((v for v in stored if v), None) or str(uuid.uuid4())
+    for path, existing in zip(paths, stored):
+        if existing is None:
+            _write_id(path, locked)
+    return locked
 
 # ---------------------------------------------------------------------------
 # Display name — the ONE thing about a contribution that is deliberately public.
@@ -375,7 +515,8 @@ def record_consent(app_dir: str, accepted: bool) -> None:
 # ------------------------------------------------------- build the clean bundle
 def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monitor: str,
              app_version: str, round_dp: int, session_ids=None, display_name: str = "",
-             age_band: str = "unknown", equipment: dict | None = None):
+             age_band: str = "unknown", equipment: dict | None = None,
+             ball_model: str = ""):
     """Return (manifest_dict, clean_shots_dataframe). Requires consent.
 
     ``session_ids`` (an iterable of session_id values) restricts the bundle to
@@ -427,6 +568,17 @@ def _prepare(df: pd.DataFrame, *, app_dir: str, handicap_band: str, launch_monit
     bm = find_col(df, BALL_MODEL_ALIASES)
     if bm is not None:
         out["ball_model"] = df[bm].astype(str).str.strip()
+    # The ball the user declares once in their profile backfills any shot whose
+    # export didn't name one. Per-shot data always wins where it exists — that's
+    # the ball actually recorded — so this only fills blanks (and the "nan" that
+    # a missing value turns into once the column is cast to str above).
+    declared_ball = normalize_ball_model(ball_model)
+    if declared_ball:
+        if "ball_model" not in out.columns:
+            out["ball_model"] = declared_ball
+        else:
+            blank = (out["ball_model"].str.len() == 0) | out["ball_model"].str.lower().eq("nan")
+            out.loc[blank, "ball_model"] = declared_ball
     sq = find_col(df, SHOT_QUALITY_ALIASES)
     if sq is not None:
         out["shot_quality"] = pd.to_numeric(df[sq], errors="coerce").round().astype("Int64")
@@ -649,13 +801,13 @@ def build_bundle(df: pd.DataFrame, out_root: str, *, app_dir: str,
                  handicap_band: str = "unknown", launch_monitor: str = "",
                  app_version: str = "", round_dp: int = 1, session_ids=None,
                  display_name: str = "", age_band: str = "unknown",
-                 equipment: dict | None = None) -> str:
+                 equipment: dict | None = None, ball_model: str = "") -> str:
     """Write an anonymized bundle folder to ``out_root`` and return its path."""
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
                              launch_monitor=launch_monitor, app_version=app_version,
                              round_dp=round_dp, session_ids=session_ids,
                              display_name=display_name, age_band=age_band,
-                             equipment=equipment)
+                             equipment=equipment, ball_model=ball_model)
     bundle_dir = os.path.join(out_root, f"{manifest['contributor_uuid'][:8]}_{manifest['created_date']}")
     os.makedirs(bundle_dir, exist_ok=True)
     with open(os.path.join(bundle_dir, "manifest.json"), "w") as f:
@@ -669,13 +821,13 @@ def build_zip(df: pd.DataFrame, out_root: str, *, app_dir: str,
               handicap_band: str = "unknown", launch_monitor: str = "",
               app_version: str = "", round_dp: int = 1, session_ids=None,
               display_name: str = "", age_band: str = "unknown",
-              equipment: dict | None = None) -> str:
+              equipment: dict | None = None, ball_model: str = "") -> str:
     """Write a single self-contained .zip bundle into out_root; return its path."""
     manifest, out = _prepare(df, app_dir=app_dir, handicap_band=handicap_band,
                              launch_monitor=launch_monitor, app_version=app_version,
                              round_dp=round_dp, session_ids=session_ids,
                              display_name=display_name, age_band=age_band,
-                             equipment=equipment)
+                             equipment=equipment, ball_model=ball_model)
     return write_receipt_zip(manifest, _shots_csv(out), out_root)
 
 
@@ -683,7 +835,7 @@ def send_bundle(df: pd.DataFrame, *, app_dir: str, url: str, key: str | None = N
                 handicap_band: str = "unknown", launch_monitor: str = "",
                 app_version: str = "", round_dp: int = 1, timeout: int = 30,
                 session_ids=None, display_name: str = "", age_band: str = "unknown",
-                equipment: dict | None = None) -> dict:
+                equipment: dict | None = None, ball_model: str = "") -> dict:
     """POST an anonymized bundle to the intake Worker.
 
     Returns the parsed reply, plus ``shot_count`` and — so the caller can offer
@@ -697,7 +849,7 @@ def send_bundle(df: pd.DataFrame, *, app_dir: str, url: str, key: str | None = N
                              launch_monitor=launch_monitor, app_version=app_version,
                              round_dp=round_dp, session_ids=session_ids,
                              display_name=display_name, age_band=age_band,
-                             equipment=equipment)
+                             equipment=equipment, ball_model=ball_model)
     shots_csv = _shots_csv(out)
     payload = json.dumps({"manifest": manifest, "shots_csv": shots_csv}).encode("utf-8")
     headers = {
