@@ -42,6 +42,15 @@ OPENGOLFLAB_INTAKE_KEY = ""
 # ever gets a WAF skip rule for /data/*, this can switch to the custom domain.
 OPENGOLFLAB_COMMUNITY_URL = "https://opengolflab.etsmith1414.workers.dev/data"
 
+# Where Settings' "Download" button sends you when a newer build exists. This
+# is GitHub's own redirect to the newest full release's installer asset, by
+# exact name — the same URL the website's download button uses (see the
+# website repo's consts.ts LATEST_DOWNLOAD_URL), so the two can never drift
+# apart or point at different builds. The check that decides whether to offer
+# it lives in version_check.py. Blank hides the button.
+LATEST_DOWNLOAD_URL = ("https://github.com/OpenGolfLab/golf-sim-analytics"
+                       "/releases/latest/download/GolfSimAnalytics-Setup.exe")
+
 # Ko-fi support link ("Fuel the Lab", same wording as opengolflab.com). Shown
 # as a quiet link in the Community sidebar section and at the bottom of the
 # Contribute panel — the app's only support ask, and deliberately a passive

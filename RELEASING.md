@@ -33,18 +33,26 @@ cd C:\dev\golf-sim-analytics
    gh release create vX.Y.Z "installer\Output\GolfSimAnalytics-Setup.exe" --title "vX.Y.Z" --notes "What changed"
    ```
 
-Two rules:
+Three rules:
 
 - **Never mark it pre-release.** The website's direct-download link only
   follows full releases; a pre-release leaves the button serving the old
-  version.
+  version. The app's own update check reads `/releases/latest` for the same
+  reason — a pre-release is invisible to both.
 - **Never rename the asset.** The site resolves
   `releases/latest/download/GolfSimAnalytics-Setup.exe` by exact name
   (`INSTALLER_ASSET_NAME` in the website repo's `src/consts.ts`, matching
-  `OutputBaseFilename` in `installer/GolfSimAnalytics.iss`).
+  `OutputBaseFilename` in `installer/GolfSimAnalytics.iss`, and
+  `config.LATEST_DOWNLOAD_URL` for the app's Download button).
+- **Tag as `vX.Y.Z`, and bump `config.APP_VERSION` to match.** The update
+  notice compares the two: a tag whose number isn't higher than the shipped
+  `APP_VERSION` shows nobody anything (`version_check.is_newer`). Forgetting
+  the `APP_VERSION` bump is the quiet failure — the release goes out, and
+  every existing install keeps believing it's current.
 
 Publishing the release IS the site update — the download button points at the
-new installer immediately, no site deploy involved.
+new installer immediately, no site deploy involved. It's also what tells
+existing installs there's something to update to; there's no separate step.
 
 ## Phase 4 — Only when the contribution schema or Worker changed
 
