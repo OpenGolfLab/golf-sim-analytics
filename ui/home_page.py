@@ -241,14 +241,58 @@ def build_home_page(parent, stats: HomeStats, image_path,
         verified = h_data.verified
         color = Colors.SUCCESS if verified else Colors.TEXT_MUTED
 
-        # Sized to the card, like the record tiles: "+2.1" and "---" are
-        # narrow, but a plus-handicap with two digits still has to fit.
-        size = sc(FONT_SCALE["display"])
+        # Laid out bottom-up from their own measured heights, because the
+        # status line still wraps in a card this narrow (a still-building
+        # handicap that also lost rounds to mulligans runs to three lines).
+        # The fixed offsets this replaces assumed one line each, so the moment
+        # either wrapped they drew straight through each other and the last
+        # line fell out of the bottom of the card.
+        wrap = (x1 - x0) - sc(40)
+
+        def _top_of(item, fallback):
+            bb = canvas.bbox(item)
+            return bb[1] if bb else fallback
+
+        disclaimer = canvas.create_text(
+            cx, y1 - sc(18), text="Not a USGA index",
+            anchor="sw", font=_font("caption"), fill=Colors.TEXT_MUTED, width=wrap)
+        status = canvas.create_text(
+            cx, _top_of(disclaimer, y1 - sc(18)) - sc(8), text=h_data.status,
+            anchor="sw", font=_font("caption"), fill=Colors.TEXT_MUTED, width=wrap)
+
+        # The number gets whatever the title and the captions left, and is
+        # sized to fit it in BOTH directions. Width alone was the old test,
+        # which is why nothing caught this: "---" and "12.4" are narrow at any
+        # size, so the loop never ran and a 48pt number simply overlapped
+        # whatever was beneath it.
+        top = y0 + sc(46)  # clear of the card title
+        band_bottom = _top_of(status, y1 - sc(60)) - sc(10)
+        band = max(sc(20), band_bottom - top)
         inner = (x1 - x0) - sc(90)
-        while size > sc(FONT_SCALE["heading"]) and tkfont.Font(
-                family=FONT_FAMILY, size=size, weight="bold").measure(value) > inner:
+
+        # Starts at the hero size and comes down to whatever actually fits.
+        # That single rule also settles the empty state: "---" is never too
+        # wide, so on the old width-only test it stayed at 48pt and rendered
+        # as three heavy bars dominating the card — but it's just as tall as
+        # any number, so fitting the height brings it back down with
+        # everything else. No special case for it.
+        size = sc(FONT_SCALE["display"])
+        floor = sc(FONT_SCALE["body"])
+        while size > floor:
+            probe = tkfont.Font(family=FONT_FAMILY, size=size, weight="bold")
+            if probe.measure(value) <= inner and probe.metrics("linespace") <= band:
+                break
             size -= 1
-        cy = (y0 + y1) / 2 - sc(2)
+
+        # Centred in the band when there's room, but never lower than sitting
+        # directly on top of it. The clamp is what holds when there ISN'T room:
+        # a still-building handicap that also lost rounds to mulligans has a
+        # three-line status, and at 150% scale that plus the caveat fills the
+        # card outright. The number then gets whatever is left rather than
+        # being centred into the text below it.
+        line = tkfont.Font(family=FONT_FAMILY, size=size, weight="bold").metrics("linespace")
+        cy = min((top + band_bottom) / 2, band_bottom - line / 2)
+        cy = max(cy, top + line / 2)  # ...and never up into the card's title
         canvas.create_text(cx, cy, text=value, anchor="w",
                            font=(FONT_FAMILY, size, "bold"), fill=color)
 
@@ -257,13 +301,6 @@ def build_home_page(parent, stats: HomeStats, image_path,
             canvas.create_text(cx + big.measure(value) + sc(10), cy + sc(6),
                                text="✓ Verified", anchor="w",
                                font=_font("caption", "bold"), fill=Colors.SUCCESS)
-
-        canvas.create_text(cx, y1 - sc(42), text=h_data.status, anchor="w",
-                           font=_font("caption"), fill=Colors.TEXT_MUTED,
-                           width=(x1 - x0) - sc(40))
-        canvas.create_text(cx, y1 - sc(20), text="Not a USGA index — sim rounds only",
-                           anchor="w", font=_font("caption"), fill=Colors.TEXT_MUTED,
-                           width=(x1 - x0) - sc(40))
 
     def _redraw(w, h):
         canvas.delete("all")
