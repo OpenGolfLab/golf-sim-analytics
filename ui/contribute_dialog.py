@@ -30,6 +30,7 @@ from ui.sent_snapshot import show_sent_snapshot
 
 import contribute
 from data import on_course
+from data import settings as settings_mod
 from data.store import load_master_dataframe
 
 log = logging.getLogger(__name__)
@@ -125,7 +126,6 @@ def build_contribute_body(card, close, configured_name: str | None = None):
     # them — and are pointed at Settings to change it — rather than discovering
     # it after the fact on the website.
     if configured_name is None:
-        from data import settings as settings_mod
         configured_name = settings_mod.get("display_name")
     active_name, was_generated = contribute.resolve_display_name(app_dir, configured_name)
 
@@ -140,7 +140,19 @@ def build_contribute_body(card, close, configured_name: str | None = None):
         who_note = "Shown publicly next to your data on opengolflab.org."
     who_label = theme.body_label(card, who_note, color=Colors.TEXT_MUTED, font=theme.font("caption"),
                                  wraplength=420, justify="left", anchor="w")
-    who_label.pack(anchor="w", pady=(2, 10))
+    who_label.pack(anchor="w", pady=(2, 4))
+
+    # The name is yours to change whenever; the id underneath it is not. Say so
+    # here, because the two behave oppositely and the difference is the whole
+    # reason a second contribution updates your data instead of appearing as a
+    # second golfer. Shown truncated — the same 8 characters as the receipt.
+    theme.body_label(
+        card, f"Contributor ID {contribute.get_contributor_uuid(app_dir)[:8]}… — permanent. "
+        "Rename yourself as often as you like; your contributions stay grouped "
+        "under this one id, so re-sending updates your data instead of "
+        "counting you twice.",
+        color=Colors.TEXT_MUTED, font=theme.font("caption"),
+        wraplength=420, justify="left", anchor="w").pack(anchor="w", pady=(0, 10))
 
     # Uniqueness check, off-thread (a network call must never freeze the panel):
     # if another golfer already claims this name, show the exact suffixed name
@@ -266,14 +278,39 @@ def build_contribute_body(card, close, configured_name: str | None = None):
 
     selected_label.pack(anchor="w", pady=(2, 10))
 
+    # ---- your profile: handicap, monitor, age, bag, ball ----
+    #
+    # Everything from here down describes the golfer rather than this
+    # contribution, so all of it is remembered. A value is validated against
+    # the same allowlist the wire format uses before it's shown, because
+    # settings.json is hand-editable and a junk value must not end up
+    # pre-selected in a dropdown (or, worse, silently sent).
+    theme.section_label(card, "Your profile (optional)", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
+    theme.body_label(
+        card, "Saved for next time — fill these in once and every future "
+        "contribution carries them.",
+        color=Colors.TEXT_MUTED, font=theme.font("caption"),
+        wraplength=420, justify="left", anchor="w",
+    ).pack(anchor="w", pady=(0, 8))
+
+    def _remember(key: str, var: tk.StringVar, clean=lambda v: v):
+        """Persist a profile field on every edit, as the user makes it."""
+        var.trace_add("write", lambda *_a: settings_mod.set(key, clean(var.get())))
+
     # ---- optional handicap band ----
-    theme.section_label(card, "Your handicap (optional)", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
-    band_var = tk.StringVar(value="unknown")
+    saved_band = settings_mod.get("handicap_band")
+    theme.section_label(card, "Your handicap", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
+    band_var = tk.StringVar(value=saved_band if saved_band in contribute.HANDICAP_BANDS
+                            else "unknown")
+    _remember("handicap_band", band_var)
     theme.dropdown(card, list(contribute.HANDICAP_BANDS), band_var, width=200).pack(anchor="w", pady=(0, 10))
 
     # ---- optional launch monitor (drives the data-quality tier) ----
-    theme.section_label(card, "Your launch monitor (optional)", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
-    monitor_var = tk.StringVar(value="")
+    saved_monitor = settings_mod.get("launch_monitor")
+    theme.section_label(card, "Your launch monitor", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
+    monitor_var = tk.StringVar(value=saved_monitor if saved_monitor in contribute.LAUNCH_MONITORS
+                               else "")
+    _remember("launch_monitor", monitor_var)
     theme.dropdown(card, list(contribute.LAUNCH_MONITORS), monitor_var, width=200).pack(anchor="w", pady=(0, 2))
     theme.body_label(
         card, "Tells us how your spin was captured (measured vs. modeled), so "
@@ -284,8 +321,7 @@ def build_contribute_body(card, close, configured_name: str | None = None):
 
     # ---- optional age band (v1.4) ----
     # Banded on purpose (never an exact age next to a public name), defaulting
-    # to "Prefer not to say". Persisted: age doesn't change per contribution.
-    from data import settings as settings_mod
+    # to "Prefer not to say".
     _AGE_LABELS = {"unknown": "Prefer not to say"}
     _age_display = [_AGE_LABELS.get(b, b) for b in contribute.AGE_BANDS]
 
@@ -293,18 +329,17 @@ def build_contribute_body(card, close, configured_name: str | None = None):
         return next((b for b in contribute.AGE_BANDS
                      if _AGE_LABELS.get(b, b) == display), "unknown")
 
-    saved_band = settings_mod.get("age_band")
-    theme.section_label(card, "Your age (optional)", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
-    age_var = tk.StringVar(value=_AGE_LABELS.get(saved_band, saved_band)
-                           if saved_band in contribute.AGE_BANDS else "Prefer not to say")
-    age_var.trace_add("write", lambda *_a: settings_mod.set("age_band", _age_to_band(age_var.get())))
+    saved_age = settings_mod.get("age_band")
+    theme.section_label(card, "Your age", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
+    age_var = tk.StringVar(value=_AGE_LABELS.get(saved_age, saved_age)
+                           if saved_age in contribute.AGE_BANDS else "Prefer not to say")
+    _remember("age_band", age_var, _age_to_band)
     theme.dropdown(card, _age_display, age_var, width=200).pack(anchor="w", pady=(0, 10))
 
     # ---- optional bag (v1.4): driver / irons / wedges, brand + model ----
-    # Powers the site's equipment filters. Persisted for the same reason as age:
-    # a bag changes rarely, a contribution happens often. Leaving everything
-    # blank is a first-class choice — the filters have a "Not specified" bucket.
-    theme.section_label(card, "Your bag (optional)", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
+    # Powers the site's equipment filters. Leaving everything blank is a
+    # first-class choice — the filters have a "Not specified" bucket.
+    theme.section_label(card, "Your bag", color=Colors.WARNING).pack(anchor="w", pady=(2, 2))
     theme.body_label(
         card, "Helps other golfers filter community data by gear. Leave blank "
         "to skip — shots still count either way.",
@@ -347,6 +382,22 @@ def build_contribute_body(card, close, configured_name: str | None = None):
         return {slot: {"brand": bvar.get().strip(), "model": mvar.get().strip()}
                 for slot, (bvar, mvar) in equip_vars.items()}
 
+    # The ball, in the same grid — it's part of what you play, and the site's
+    # community points already carry it. Free text rather than a dropdown:
+    # unlike club brands there's no short list that wouldn't exclude someone.
+    # Where a shot export names the ball per shot, that wins; this fills in for
+    # the exports (most of them) that don't.
+    ball_var = tk.StringVar(value=settings_mod.get("ball_model") or "")
+    _remember("ball_model", ball_var, lambda v: v.strip())
+    theme.body_label(bag, "Ball", color=Colors.TEXT_PRIMARY).grid(
+        row=len(equip_vars), column=0, sticky="w", padx=(0, 8), pady=4)
+    ctk.CTkEntry(bag, textvariable=ball_var, width=170,
+                 height=theme.CONTROL_HEIGHT, corner_radius=theme.CONTROL_RADIUS,
+                 font=theme.font("body"), fg_color="transparent",
+                 border_color=Colors.BORDER, border_width=1,
+                 placeholder_text="Pro V1").grid(
+        row=len(equip_vars), column=1, columnspan=2, pady=4, sticky="w")
+
     # ---- status line ----
     status = theme.body_label(card, "", color=Colors.TEXT_MUTED, font=theme.font("caption"),
                               wraplength=420, justify="left", anchor="w")
@@ -386,7 +437,7 @@ def build_contribute_body(card, close, configured_name: str | None = None):
                 app_version=getattr(config, "APP_VERSION", ""),
                 session_ids=chosen, display_name=configured_name,
                 age_band=_age_to_band(age_var.get()),
-                equipment=_current_equipment(),
+                equipment=_current_equipment(), ball_model=ball_var.get(),
             )
         except Exception as exc:  # noqa: BLE001
             _set_status(f"Couldn't save: {exc}", Colors.WARNING)
@@ -421,7 +472,7 @@ def build_contribute_body(card, close, configured_name: str | None = None):
                 app_version=getattr(config, "APP_VERSION", ""),
                 session_ids=chosen, display_name=configured_name,
                 age_band=_age_to_band(age_var.get()),
-                equipment=_current_equipment(),
+                equipment=_current_equipment(), ball_model=ball_var.get(),
             )
         except Exception as exc:  # noqa: BLE001
             _set_status(f"Upload failed: {exc}", Colors.WARNING)

@@ -1939,11 +1939,56 @@ class SimAnalyticsApp:
         footer.pack(fill="x", pady=(4, 0))
         # Build identification — the one line that answers "is the exe I'm
         # running actually the build with the fix?".
-        theme.body_label(
+        version_lbl = theme.body_label(
             footer, f"Golf Sim Analytics v{getattr(config, 'APP_VERSION', '?')}",
             color=Colors.TEXT_MUTED, font=theme.font("caption"),
-        ).pack(side="left")
+        )
+        version_lbl.pack(side="left")
         theme.ghost_button(footer, text="Close", command=close, width=100).pack(side="right")
+        self._build_update_check(footer, version_lbl)
+
+    def _build_update_check(self, footer, version_lbl):
+        """Turn the version line into an update notice when there's a newer
+        release, and offer a Download button beside it.
+
+        Nothing here is allowed to make Settings worse. The request runs on a
+        daemon thread (same pattern as the contribute panel's name check), so
+        the panel opens at its normal speed whether or not there's a network;
+        an unreachable or rate-limited GitHub leaves the line exactly as it
+        was, because "we couldn't check" is not news worth showing someone who
+        came here to change a setting.
+
+        The button opens the browser rather than downloading anything — see
+        the note at the top of version_check.
+
+        Returns the check's thread (or None when there's nothing to check), so
+        a caller — in practice a test — can wait for it rather than guess.
+        """
+        import version_check
+
+        download_url = getattr(config, "LATEST_DOWNLOAD_URL", "")
+        current = getattr(config, "APP_VERSION", "")
+        if not download_url or not current:
+            return None
+
+        def _apply(result):
+            status, tag = result
+            if status != version_check.UPDATE or not version_lbl.winfo_exists():
+                return
+            version_lbl.configure(text=f"Golf Sim Analytics v{current}  ·  {tag} available",
+                                  text_color=Colors.SUCCESS)
+            theme.ghost_button(
+                footer, text="Download", width=110,
+                command=lambda: webbrowser.open_new_tab(download_url),
+            ).pack(side="left", padx=(8, 0))
+
+        def _on_result(result):
+            try:
+                version_lbl.after(0, _apply, result)
+            except Exception:  # noqa: BLE001
+                pass  # panel closed mid-check
+
+        return version_check.check_async(current, _on_result)
 
     def _sample_set_available(self) -> bool:
         """True if the selected demo dataset's folder exists with data in it;

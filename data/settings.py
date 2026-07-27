@@ -60,13 +60,27 @@ DEFAULTS: dict = {
     # here lives in contribute.normalize_display_name, next to the code that
     # puts it on the wire.
     "display_name": "",
-    # Self-reported age band ("under 30" … "70+", "unknown" = prefer not to
-    # say) and bag-level equipment ({driver|irons|wedges: {brand, model}}).
-    # Both optional, both persisted so a contributor enters them once, not per
-    # contribution. Validation lives in contribute (AGE_BANDS /
-    # normalize_equipment) next to the code that puts them on the wire.
+    # The rest of the contributor profile. Every one of these describes the
+    # GOLFER, not the contribution, so all of them are persisted: filled in
+    # once and reused on every subsequent send, rather than re-picked from a
+    # blank dropdown each time (which is how a contributor ends up publishing
+    # "unknown" handicap and no launch monitor on half their bundles).
+    #
+    #   age_band       "under 30" … "70+", "unknown" = prefer not to say
+    #   equipment      {driver|irons|wedges: {brand, model}}
+    #   handicap_band  "scratch" … "25+", "unknown"
+    #   launch_monitor the monitor model, "" = not declared
+    #   ball_model     free text, "" = not declared
+    #
+    # All optional. Validation lives in contribute (AGE_BANDS, HANDICAP_BANDS,
+    # LAUNCH_MONITORS, normalize_equipment, normalize_ball_model) next to the
+    # code that puts them on the wire — a value read back from here is treated
+    # as untrusted, because this file is hand-editable.
     "age_band": "unknown",
     "equipment": {},
+    "handicap_band": "unknown",
+    "launch_monitor": "",
+    "ball_model": "",
     # How far the user sits from the display. Feeds "Auto" scaling only — an
     # explicit percentage still wins outright. Defaults to "At a desk", which is
     # what Auto has always assumed, so an existing install is unchanged.
