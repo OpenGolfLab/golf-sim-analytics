@@ -203,9 +203,9 @@ met.
 
 One deviation from this entry, decided by the product owner: it's called **Sim
 Handicap**, not Sim Index. The guardrail this entry exists to protect is
-enforced by printing "Not a USGA index — sim rounds only" permanently under the
-number rather than by hiding it in a tooltip, which is stronger than what was
-asked for here — a hover can't travel with a number someone quotes to a friend.
+enforced by printing "Not a USGA index" permanently under the number rather
+than by hiding it in a tooltip, which is stronger than what was asked for
+here — a hover can't travel with a number someone quotes to a friend.
 
 Rounds that used a mulligan are excluded outright and marked with an asterisk
 across the on-course dashboard (`data/on_course.py::mulligan_flags`), which
