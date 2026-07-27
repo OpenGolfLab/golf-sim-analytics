@@ -19,9 +19,51 @@
 ; installer\Output\GolfSimAnalytics-Setup.exe.
 
 #define MyAppName "Golf Sim Analytics"
-#define MyAppVersion "1.0.0"
 #define MyAppPublisher "Golf Sim Analytics"
 #define MyAppExeName "GolfSimAnalytics.exe"
+
+; The installed version -- what Add/Remove Programs lists -- is read out of
+; config.py's APP_VERSION at compile time, so there is exactly one number to
+; bump at release time (RELEASING.md phase 1) and no way for the installer to
+; disagree with the app it installs. It was hard-coded here instead, and had
+; read "1.0.0" since the first release: every build through v1.4.0 installed
+; itself as 1.0.0 no matter what the app reported in Settings.
+;
+; Parsed by the preprocessor rather than passed in on the ISCC command line,
+; so it works both ways this script gets compiled -- build_installer.bat, and
+; opening it in the Inno Setup IDE (see the header note above).
+; SourcePath (this script's own folder) rather than a bare relative path: the
+; preprocessor's FileOpen resolves against the current working directory, not
+; the script, so "..\config.py" finds nothing when ISCC is invoked from the
+; repo root -- which is exactly how build_installer.bat invokes it.
+#define ConfigFile AddBackslash(SourcePath) + "..\config.py"
+#define MyAppVersion
+#define ConfigHandle
+#define ConfigLine
+
+#sub ReadAppVersion
+  #define ConfigLine FileRead(ConfigHandle)
+  #if (Pos("APP_VERSION", ConfigLine) == 1) && (Pos('"', ConfigLine) > 0)
+    ; "public" is required, not decoration: a #define inside a #sub is local
+    ; to that sub, so without it the version is found and then discarded when
+    ; the sub returns -- and the #error below fires on a config.py that was
+    ; parsed perfectly well.
+    #define public MyAppVersion \
+      Copy(ConfigLine, Pos('"', ConfigLine) + 1, \
+           RPos('"', ConfigLine) - Pos('"', ConfigLine) - 1)
+  #endif
+#endsub
+
+#for {ConfigHandle = FileOpen(ConfigFile); \
+      ConfigHandle && !FileEof(ConfigHandle); ""} ReadAppVersion
+#expr FileClose(ConfigHandle)
+
+; Fail the build rather than guess. An installer labelled with a version it
+; isn't is the exact bug being fixed here, and it's invisible until someone
+; opens Add/Remove Programs months later.
+#if MyAppVersion == ""
+  #error Could not read APP_VERSION from config.py -- refusing to build a mislabelled installer.
+#endif
 
 [Setup]
 ; Fixed AppId so re-running a newer installer upgrades in place instead
