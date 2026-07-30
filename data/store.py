@@ -213,6 +213,49 @@ def unique_clubs(df: pd.DataFrame) -> list[str]:
     return sorted(df["club"].dropna().unique().tolist(), key=get_club_rank)
 
 
+# Club-speed readings outside this window are sensor glitches, not swings —
+# without the guard a single misread 400mph row would permanently deflate
+# every later shot's effort percent for that club.
+SPEED_PLAUSIBLE_MPH = (30.0, 150.0)
+
+# A club needs this many real speed readings before effort percents appear:
+# "97% of max" over four swings isn't a personal max, it's four swings.
+MIN_SPEED_READINGS = 10
+
+
+def add_speed_pct(df: pd.DataFrame) -> pd.DataFrame:
+    """Add ``speed_pct`` — each shot's club speed as a percent of that club's
+    max over the whole frame — feeding the Dispersion panel's Effort filter
+    and coloring.
+
+    Pass the full practice history, not a filtered slice: a time-filtered
+    dashboard should still measure effort against the true all-time max,
+    which is what "a max swing speed per club, saved over time" means when
+    every shot is already archived. Rows without a plausible club speed
+    (live-tracked shots often have none) get NaN and simply don't participate.
+    """
+    if df.empty or "club" not in df.columns:
+        return df
+    cs_col = find_col(df, CLUB_SPEED_ALIASES)
+    if not cs_col:
+        return df
+
+    speed = pd.to_numeric(df[cs_col], errors="coerce")
+    lo, hi = SPEED_PLAUSIBLE_MPH
+    valid = speed.where((speed >= lo) & (speed <= hi))
+    grouped = valid.groupby(df["club"])
+    club_max = grouped.transform("max")
+    club_n = grouped.transform("count")
+
+    df = df.copy()
+    df["speed_pct"] = np.where(
+        valid.notna() & (club_n >= MIN_SPEED_READINGS) & (club_max > 0),
+        valid / club_max * 100.0,
+        np.nan,
+    )
+    return df
+
+
 class PlayerRecords:
     """Longest drive / max club speed / Sim Handicap / theoretical max drive
     summary shown on the landing page."""

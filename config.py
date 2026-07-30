@@ -18,7 +18,7 @@ from pathlib import Path
 # bundles (see contribute.py) so shared data is traceable to a build. Also
 # shown at the bottom of the Settings panel, so "which build am I actually
 # running?" is answerable at a glance — bump this on any user-visible change.
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.5.0"
 
 # OpenGolfLab intake Worker. Paste your deployed Cloudflare Worker URL here to
 # enable one-click "Send to OpenGolfLab" in the Contribute dialog. Leave blank
@@ -41,6 +41,12 @@ OPENGOLFLAB_INTAKE_KEY = ""
 # this URL returns the JSON). Both are the same deployed Worker. If the zone
 # ever gets a WAF skip rule for /data/*, this can switch to the custom domain.
 OPENGOLFLAB_COMMUNITY_URL = "https://opengolflab.etsmith1414.workers.dev/data"
+
+# Feedback inbox — the website's /api/feedback route (see the website repo's
+# src/pages/api/feedback.ts). Backs the "Send feedback" button in Settings.
+# Same workers.dev-not-custom-domain reasoning as OPENGOLFLAB_COMMUNITY_URL
+# above. Blank hides the button.
+OPENGOLFLAB_FEEDBACK_URL = "https://opengolflab.etsmith1414.workers.dev/api/feedback"
 
 # Where Settings' "Download" button sends you when a newer build exists. This
 # is GitHub's own redirect to the newest full release's installer asset, by

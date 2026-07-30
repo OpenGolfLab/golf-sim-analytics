@@ -55,7 +55,8 @@ from data.columns import BALL_SPEED_ALIASES, CLUB_SPEED_ALIASES, find_col
 from data.export_watcher import ExportWatcher
 from data.io import ingest_all_csvs
 from data.store import (
-    compute_home_stats, compute_home_trends, compute_player_records, load_master_dataframe,
+    add_speed_pct, compute_home_stats, compute_home_trends, compute_player_records,
+    load_master_dataframe,
 )
 from live.gspro_db import ClubDataLookup
 from live.round_watcher import LiveRoundWatcher
@@ -70,6 +71,7 @@ from ui.charts.club_compare import NAME as CLUB_COMPARE_NAME
 from ui.charts.session_compare import NAME as SESSION_COMPARE_NAME
 from ui.charts.shot_timeline import NAME as TIMELINE_NAME
 from ui.charts.speed_training import NAME as TRAINING_NAME
+from ui.charts import dispersion
 from ui.charts.dispersion import NAME as DISPERSION_NAME
 from ui.charts.gapping import NAME as GAPPING_NAME
 from ui.charts.launch_spin import NAME as LAUNCH_SPIN_NAME
@@ -81,6 +83,7 @@ from ui.charts.trajectory import NAME as TRAJECTORY_NAME
 from ui.components import DropdownPanel, MultiSelectDropdown, SingleSelectDropdown, menu_item
 from ui.dialogs import show_toast
 from ui.empty_state import show_message
+from ui.feedback_dialog import open_feedback_dialog
 from ui.home_page import build_home_page, course_banner
 
 log = logging.getLogger(__name__)
@@ -354,6 +357,9 @@ class SimAnalyticsApp:
             if d.name == DISPERSION_NAME:
                 entry["dist_var"] = tk.StringVar(value="Carry")
                 entry["detail_var"] = tk.StringVar(value="In-Depth")
+                # Effort band (% of per-club max speed) — see data/store.py
+                # add_speed_pct and the band constants in charts/dispersion.py.
+                entry["effort_var"] = tk.StringVar(value=dispersion.EFFORT_ALL)
                 entry["on_shot_click"] = self._edit_historical_shot
             if d.name == SESSION_COMPARE_NAME:
                 # One club; the session checklist is (re)built per-panel in
@@ -1332,6 +1338,10 @@ class SimAnalyticsApp:
         # scorecard can still count strokes-per-hole.
         self.master_df = on_course.exclude_putts(on_course.practice_view(
             full, exclude_on_course=self.settings_exclude_on_course.get()))
+        # Effort (% of per-club max speed) rides on the full practice history,
+        # so a time-filtered dashboard still measures each shot against the
+        # true all-time max (see data/store.py::add_speed_pct).
+        self.master_df = add_speed_pct(self.master_df)
         if "club" in self.master_df.columns:
             clubs = sorted(self.master_df["club"].dropna().unique().tolist(), key=get_club_rank)
             for c in clubs:
@@ -1945,6 +1955,11 @@ class SimAnalyticsApp:
         )
         version_lbl.pack(side="left")
         theme.ghost_button(footer, text="Close", command=close, width=100).pack(side="right")
+        if getattr(config, "OPENGOLFLAB_FEEDBACK_URL", ""):
+            theme.ghost_button(
+                footer, text="Send feedback", width=130,
+                command=lambda: open_feedback_dialog(self.root),
+            ).pack(side="right", padx=(0, 8))
         self._build_update_check(footer, version_lbl)
 
     def _build_update_check(self, footer, version_lbl):
@@ -2400,6 +2415,18 @@ class SimAnalyticsApp:
                 accent=Colors.INFO, width=120,
             ).pack(side=tk.RIGHT, padx=(10, 4))
             theme.body_label(top_bar, "Detail:", color=Colors.TEXT_MUTED).pack(side=tk.RIGHT)
+            # Effort: dispersion sliced by % of the club's all-time max speed —
+            # the "does swinging past my optimal speed widen the cloud?" filter.
+            SingleSelectDropdown(
+                top_bar, dispersion.EFFORT_OPTIONS, entry["effort_var"],
+                on_change=update_local, accent=Colors.WARNING, width=150,
+            ).pack(side=tk.RIGHT, padx=(10, 4))
+            theme.body_label(top_bar, "Effort:", color=Colors.TEXT_MUTED).pack(side=tk.RIGHT)
+            SingleSelectDropdown(
+                top_bar, dispersion.COLOR_OPTIONS, entry["color_var"],
+                on_change=update_local, accent=Colors.INFO, width=150,
+            ).pack(side=tk.RIGHT, padx=(10, 4))
+            theme.body_label(top_bar, "Color:", color=Colors.TEXT_MUTED).pack(side=tk.RIGHT)
 
         if name == SESSION_COMPARE_NAME:
             clubs = sorted(self.master_df["club"].dropna().unique(), key=get_club_rank) \

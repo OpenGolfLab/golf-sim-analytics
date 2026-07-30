@@ -12,7 +12,7 @@ import math
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from matplotlib.colors import LinearSegmentedColormap, to_rgba
+from matplotlib.colors import LinearSegmentedColormap, Normalize, to_rgba
 
 from config import Colors, get_club_rank
 from data import units as units_mod
@@ -38,6 +38,32 @@ CATEGORY = "Metrics"
 COLUMN = "right"
 HAS_COLOR = True
 
+# ---- Effort (% of max club speed) ------------------------------------------
+# Each shot's club speed as a percent of that club's all-time max
+# (data/store.py::add_speed_pct). The bands test the "swinging past your
+# optimal speed widens the cloud" theory: pick Smooth, then Flat out, and
+# watch whether the cloud blooms. Band edges are honest guesses, not science —
+# a typical shot sits ~90-95% of a true max, so <90% is a genuinely easy
+# swing and 97%+ is chasing the ceiling.
+EFFORT_ALL = "All effort"
+EFFORT_SMOOTH = "Smooth (<90%)"
+EFFORT_PUSHING = "Pushing (90–97%)"
+EFFORT_MAX = "Flat out (97%+)"
+EFFORT_OPTIONS = [EFFORT_ALL, EFFORT_SMOOTH, EFFORT_PUSHING, EFFORT_MAX]
+_EFFORT_BANDS = {
+    EFFORT_SMOOTH: (0.0, 90.0),
+    EFFORT_PUSHING: (90.0, 97.0),
+    EFFORT_MAX: (97.0, float("inf")),
+}
+
+# Color-by modes for the scatter overlay. COLOR_EFFORT paints each shot by its
+# effort percent, which shows the speed/dispersion relationship in one view
+# without slicing the data thin.
+COLOR_CLUB = "Club"
+COLOR_TIMELINE = "Date (Timeline)"
+COLOR_EFFORT = "Effort (% max)"
+COLOR_OPTIONS = [COLOR_CLUB, COLOR_TIMELINE, COLOR_EFFORT]
+
 
 def render(fig, df, club_colors, font_scale, config, **extra):
     if df.empty:
@@ -46,6 +72,25 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     unit = extra.get("units", units_mod.YARDS)
     df = units_mod.to_display_frame(df, unit)
     u = units_mod.dist_suffix_lower(unit)  # tooltip suffix ("yds"/"m")
+    effort = config.get("effort_var").get() if "effort_var" in config else EFFORT_ALL
+
+    # Effort band filter, before any axes exist so its empty states render as
+    # a clean message rather than a message over blank axes.
+    if effort != EFFORT_ALL:
+        if "speed_pct" not in df.columns or not df["speed_pct"].notna().any():
+            show_message(
+                fig, "No club-speed data for the Effort filter", font_scale,
+                hint="Effort needs shots with club speed — CSV exports carry it; "
+                     "live-tracked shots may not, and a club needs 10+ readings",
+            )
+            return
+        lo, hi = _EFFORT_BANDS[effort]
+        df = df[(df["speed_pct"] >= lo) & (df["speed_pct"] < hi)]
+        if df.empty:
+            show_message(fig, f"No shots in the {effort} band", font_scale,
+                         hint="Loosen the Effort filter above")
+            return
+
     ax = fig.add_subplot(111)
     color_pref = config["color_var"].get()
     dist_pref = config.get("dist_var").get() if "dist_var" in config else "Carry"
@@ -157,6 +202,8 @@ def _render_indepth(fig, ax, df, club_colors, font_scale, order, offline_col, y_
         ]
         if bs_col and pd.notna(row.get(bs_col)):
             lines.append(f"Ball speed: {row[bs_col]:.0f} mph")
+        if "speed_pct" in row.index and pd.notna(row["speed_pct"]):
+            lines.append(f"Effort: {row['speed_pct']:.0f}% of your max")
         # Launch/descent/spin/smash — what went right or wrong on this shot,
         # each angle flagged against this club's optimal window.
         lines.extend(diagnostic_lines(row, diag_cols, club=row["club"]))
@@ -164,7 +211,11 @@ def _render_indepth(fig, ax, df, club_colors, font_scale, order, offline_col, y_
             lines.append(pd.to_datetime(row["session_date"]).strftime("%b %d, %Y"))
         return "\n".join(lines)
 
-    if color_pref == "Date (Timeline)" and "session_date" in df.columns:
+    # Which frame the trailing hover attach pairs with `sc` — the effort
+    # branch scatters a subset of pts and swaps this to match.
+    tooltip_pts = pts
+
+    if color_pref == COLOR_TIMELINE and "session_date" in df.columns:
         norm, cmap = get_timeline_colormap(df)
         pts_dates = pd.to_numeric(pd.to_datetime(pts["session_date"]))
         sc = ax.scatter(
@@ -173,6 +224,32 @@ def _render_indepth(fig, ax, df, club_colors, font_scale, order, offline_col, y_
         )
         cbar = styled_colorbar(fig, sc, ax, "Oldest → Newest", font_scale)
         cbar.set_ticks([])
+    elif (color_pref == COLOR_EFFORT and "speed_pct" in pts.columns
+          and pts["speed_pct"].notna().any()):
+        # Calm blue-grey at an easy swing through gold to brick red at the
+        # ceiling — the question this mode answers is "are my wild ones the
+        # fast ones?", so heat = effort. Shots with no club speed can't answer
+        # it; they stay on the plot as faded grey context rather than
+        # silently vanishing.
+        known = pts[pts["speed_pct"].notna()].reset_index(drop=True)
+        unknown = pts[pts["speed_pct"].isna()].reset_index(drop=True)
+        if not unknown.empty:
+            sc_u = ax.scatter(
+                unknown[offline_col], unknown[y_col], c=Colors.CLUB_FALLBACK,
+                s=40, alpha=0.35, edgecolor="black", linewidth=0.5, zorder=1,
+            )
+            attach_hover_tooltip(fig, sc_u, unknown, _tooltip, font_scale)
+        effort_cmap = LinearSegmentedColormap.from_list(
+            "effort", [Colors.INFO, Colors.WARNING, Colors.DANGER])
+        # Fixed 70-100% range so the colors mean the same thing across
+        # sessions and filters; the rare sub-70% shot clamps to the calm end.
+        sc = ax.scatter(
+            known[offline_col], known[y_col], c=known["speed_pct"],
+            cmap=effort_cmap, norm=Normalize(70, 100),
+            s=40, alpha=0.9, edgecolor="black", linewidth=0.5, zorder=1.1,
+        )
+        styled_colorbar(fig, sc, ax, "% of your max club speed", font_scale)
+        tooltip_pts = known
     else:
         sc = ax.scatter(
             pts[offline_col], pts[y_col],
@@ -182,7 +259,7 @@ def _render_indepth(fig, ax, df, club_colors, font_scale, order, offline_col, y_
         if config.get("num_plots", 1) == 1:
             club_legend(ax, club_colors, order, font_scale, loc=_LEGEND_LOC)
 
-    attach_hover_tooltip(fig, sc, pts, _tooltip, font_scale)
+    attach_hover_tooltip(fig, sc, tooltip_pts, _tooltip, font_scale)
 
     # Click-to-edit: clicking near a shot hands its stable shot_uid to the app
     # to reassign the club or delete it (via the reversible edits sidecar).
