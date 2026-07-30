@@ -77,8 +77,8 @@ _DESCRIPTIONS = {
                           "side by side with a summary table.",
     "Club Comparison": "Compare clubs/adapter configs hit in a session — enter brand "
                        "and adapter for each, plotted and summarized.",
-    "Shot & Club Trends": "Shots per club per calendar day across your whole "
-                          "history, stacked by club, with summary tiles.",
+    "Session Stats": "Shots per club per calendar day across your whole "
+                     "history, stacked by club, with summary tiles.",
     "Speed Training": "Driver speed development — cruising speed, fatigue curve, "
                       "velocity-vs-efficiency, and session-over-session progression.",
     "On-Course Play": "Scorecard for rounds you play on the course — score to par, "

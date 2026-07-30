@@ -12,7 +12,9 @@ import math
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib import colormaps
 from matplotlib.colors import LinearSegmentedColormap, Normalize, to_rgba
+from matplotlib.patches import Ellipse
 
 from config import Colors, get_club_rank
 from data import units as units_mod
@@ -42,19 +44,44 @@ HAS_COLOR = True
 # Each shot's club speed as a percent of that club's all-time max
 # (data/store.py::add_speed_pct). The bands test the "swinging past your
 # optimal speed widens the cloud" theory: pick Smooth, then Flat out, and
-# watch whether the cloud blooms. Band edges are honest guesses, not science —
-# a typical shot sits ~90-95% of a true max, so <90% is a genuinely easy
-# swing and 97%+ is chasing the ceiling.
+# watch whether the cloud blooms — or pick Compare bands and see all three
+# clouds at once.
+#
+# Bands are per-club TERCILES of the golfer's own swings, not fixed percent
+# cutoffs. Fixed cutoffs (v1.5.0 shipped <90 / 90-97 / 97+) looked sensible
+# and were wrong in practice: a consistent golfer's entire history sits
+# within ~6-8% of their max, so "under 90% of max" matched almost nothing —
+# their easiest swing of the year is still ~94% of max. Relative thirds are
+# always populated and self-calibrate to any golfer.
 EFFORT_ALL = "All effort"
-EFFORT_SMOOTH = "Smooth (<90%)"
-EFFORT_PUSHING = "Pushing (90–97%)"
-EFFORT_MAX = "Flat out (97%+)"
-EFFORT_OPTIONS = [EFFORT_ALL, EFFORT_SMOOTH, EFFORT_PUSHING, EFFORT_MAX]
-_EFFORT_BANDS = {
-    EFFORT_SMOOTH: (0.0, 90.0),
-    EFFORT_PUSHING: (90.0, 97.0),
-    EFFORT_MAX: (97.0, float("inf")),
+EFFORT_SMOOTH = "Smooth (easiest ⅓)"
+EFFORT_MID = "Cruising (middle ⅓)"
+EFFORT_FLAT = "Flat out (hardest ⅓)"
+EFFORT_COMPARE = "Compare bands"
+EFFORT_OPTIONS = [EFFORT_ALL, EFFORT_SMOOTH, EFFORT_MID, EFFORT_FLAT, EFFORT_COMPARE]
+EFFORT_BAND_COLORS = {
+    EFFORT_SMOOTH: Colors.INFO,
+    EFFORT_MID: Colors.WARNING,
+    EFFORT_FLAT: Colors.DANGER,
 }
+
+
+def effort_bands(df: "pd.DataFrame") -> "pd.Series":
+    """Label each shot with its per-club effort tercile (or None when the
+    shot has no speed_pct). Terciles are computed over the frame it's given,
+    so a time-filtered view bands against the swings actually on screen."""
+    pct = df["speed_pct"]
+    by_club = pct.groupby(df["club"])
+    lo = by_club.transform(lambda s: s.quantile(1 / 3))
+    hi = by_club.transform(lambda s: s.quantile(2 / 3))
+    return pd.Series(
+        np.select(
+            [pct <= lo, pct <= hi, pct.notna()],
+            [EFFORT_SMOOTH, EFFORT_MID, EFFORT_FLAT],
+            default=None,
+        ),
+        index=df.index,
+    )
 
 # Color-by modes for the scatter overlay. COLOR_EFFORT paints each shot by its
 # effort percent, which shows the speed/dispersion relationship in one view
@@ -64,6 +91,48 @@ COLOR_TIMELINE = "Date (Timeline)"
 COLOR_EFFORT = "Effort (% max)"
 COLOR_OPTIONS = [COLOR_CLUB, COLOR_TIMELINE, COLOR_EFFORT]
 
+# Detail modes. "Rings" swaps the KDE heat maps for one solid covariance
+# ellipse per group — the group being whatever the Color dropdown says
+# (per club / per era / per effort band) — because overlapping clouds stop
+# reading past two or three groups, while rings stay legible.
+DETAIL_INDEPTH = "In-Depth"
+DETAIL_RINGS = "Rings"
+DETAIL_SIMPLE = "Simple"
+DETAIL_OPTIONS = [DETAIL_INDEPTH, DETAIL_RINGS, DETAIL_SIMPLE]
+
+# Every ring drawn anywhere on this chart contains ~80% of that group's
+# shots: the golf-dispersion convention — honest about spread, but one shank
+# doesn't balloon it. k = sqrt(chi²₂(0.80)) scales the covariance ellipse.
+RING_COVERAGE = 0.80
+_RING_K = float(np.sqrt(-2.0 * np.log(1.0 - RING_COVERAGE)))
+
+
+def _draw_ring(ax, xs, ys, color, linewidth=2.2, zorder=6):
+    """Solid covariance ellipse around ~RING_COVERAGE of the points, with a
+    small dot at the mean. Needs 3+ points to say anything; returns whether
+    it drew."""
+    x = np.asarray(xs, dtype=float)
+    y = np.asarray(ys, dtype=float)
+    ok = np.isfinite(x) & np.isfinite(y)
+    x, y = x[ok], y[ok]
+    if len(x) < 3:
+        return False
+    cov = np.cov(x, y)
+    vals, vecs = np.linalg.eigh(cov)
+    vals = np.maximum(vals, 0.0)[::-1]
+    vecs = vecs[:, ::-1]
+    angle = float(np.degrees(np.arctan2(vecs[1, 0], vecs[0, 0])))
+    ax.add_patch(Ellipse(
+        (x.mean(), y.mean()),
+        width=2 * _RING_K * np.sqrt(vals[0]),
+        height=2 * _RING_K * np.sqrt(vals[1]),
+        angle=angle, fill=False, edgecolor=color,
+        linewidth=linewidth, zorder=zorder,
+    ))
+    ax.plot(x.mean(), y.mean(), marker="o", markersize=5, markerfacecolor=color,
+            markeredgecolor="black", markeredgewidth=0.6, zorder=zorder + 1)
+    return True
+
 
 def render(fig, df, club_colors, font_scale, config, **extra):
     if df.empty:
@@ -72,9 +141,12 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     unit = extra.get("units", units_mod.YARDS)
     df = units_mod.to_display_frame(df, unit)
     u = units_mod.dist_suffix_lower(unit)  # tooltip suffix ("yds"/"m")
+    color_pref = config["color_var"].get()
+    dist_pref = config.get("dist_var").get() if "dist_var" in config else "Carry"
+    detail = config.get("detail_var").get() if "detail_var" in config else DETAIL_INDEPTH
     effort = config.get("effort_var").get() if "effort_var" in config else EFFORT_ALL
 
-    # Effort band filter, before any axes exist so its empty states render as
+    # Effort banding, before any axes exist so its empty states render as
     # a clean message rather than a message over blank axes.
     if effort != EFFORT_ALL:
         if "speed_pct" not in df.columns or not df["speed_pct"].notna().any():
@@ -84,17 +156,45 @@ def render(fig, df, club_colors, font_scale, config, **extra):
                      "live-tracked shots may not, and a club needs 10+ readings",
             )
             return
-        lo, hi = _EFFORT_BANDS[effort]
-        df = df[(df["speed_pct"] >= lo) & (df["speed_pct"] < hi)]
+        bands = effort_bands(df)
+        if effort == EFFORT_COMPARE:
+            df = df[bands.notna()].copy()
+            df["effort_band"] = bands
+            # One club at a time: bands are relative to each club's own max,
+            # and 3 clouds x N clubs is unreadable anyway.
+            if df["club"].nunique() > 1:
+                show_message(
+                    fig, "Compare bands reads one club at a time", font_scale,
+                    hint="Pick a single club in the Club filter above — effort "
+                         "is relative to each club's own swings",
+                )
+                return
+        else:
+            df = df[bands == effort]
         if df.empty:
             show_message(fig, f"No shots in the {effort} band", font_scale,
                          hint="Loosen the Effort filter above")
             return
 
+    # Rings grouped by era or effort band read one club at a time (the same
+    # rule as Compare bands): the "trend" of a mixed bag mostly tracks which
+    # clubs were hit that day, not how the golfer is trending.
+    if detail == DETAIL_RINGS and effort != EFFORT_COMPARE and color_pref != COLOR_CLUB:
+        if "club" in df.columns and df["club"].nunique() > 1:
+            show_message(fig, "Trend and effort rings read one club at a time",
+                         font_scale,
+                         hint="Pick a single club in the Club filter above")
+            return
+        if color_pref == COLOR_EFFORT and (
+                "speed_pct" not in df.columns or not df["speed_pct"].notna().any()):
+            show_message(
+                fig, "No club-speed data for effort rings", font_scale,
+                hint="Effort needs shots with club speed — CSV exports carry it; "
+                     "live-tracked shots may not, and a club needs 10+ readings",
+            )
+            return
+
     ax = fig.add_subplot(111)
-    color_pref = config["color_var"].get()
-    dist_pref = config.get("dist_var").get() if "dist_var" in config else "Carry"
-    detail = config.get("detail_var").get() if "detail_var" in config else "In-Depth"
 
     offline_col = find_col(df, OFFLINE_ALIASES)
     if dist_pref == "Total":
@@ -106,7 +206,13 @@ def render(fig, df, club_colors, font_scale, config, **extra):
 
     if "club" in df.columns and offline_col and y_col:
         order = sorted(df["club"].dropna().unique(), key=get_club_rank)
-        if detail == "Simple":
+        if effort == EFFORT_COMPARE:
+            _render_compare(fig, ax, df, font_scale, offline_col, y_col,
+                            dist_pref, detail, u)
+        elif detail == DETAIL_RINGS:
+            _render_rings(fig, ax, df, club_colors, font_scale, order, offline_col,
+                          y_col, dist_pref, color_pref, u)
+        elif detail == DETAIL_SIMPLE:
             _render_simple(ax, df, club_colors, font_scale, order, offline_col, y_col,
                            dist_pref, config, u)
         else:
@@ -139,6 +245,158 @@ def render(fig, df, club_colors, font_scale, config, **extra):
     ax.set_ylabel(f"{dist_pref} ({units_mod.dist_suffix(unit)})", fontsize=font_scale)
     style_axes(ax, font_scale, grid=None)
     ax.grid(axis="x", linestyle=":", alpha=0.3, zorder=0)
+
+
+# Trend rings: the global Time filter is the era picker. A view of up to 5
+# sessions rings each session individually; a longer window pools sessions
+# (ordered by date) into up to _ERA_POOL_GROUPS near-equal groups, each
+# labeled by its date span — "Jan 12 – Mar 30".
+_ERA_MAX_INDIVIDUAL = 5
+_ERA_POOL_GROUPS = 4
+
+
+def _era_groups(df):
+    """Split the frame into (label, sub_df) eras, oldest first."""
+    if "session_id" not in df.columns or "session_date" not in df.columns:
+        return [("All shots", df)]
+    dates = pd.to_datetime(df["session_date"], errors="coerce")
+    per_session = dates.groupby(df["session_id"]).max()
+    ordered = per_session.sort_values(na_position="first").index.tolist()
+    if not ordered:
+        return [("All shots", df)]
+
+    if len(ordered) <= _ERA_MAX_INDIVIDUAL:
+        chunks = [[sid] for sid in ordered]
+    else:
+        chunks = [list(c) for c in
+                  np.array_split(np.array(ordered, dtype=object), _ERA_POOL_GROUPS)]
+
+    def _label(sids, i):
+        d0, d1 = per_session[sids[0]], per_session[sids[-1]]
+        if pd.isna(d0) or pd.isna(d1):
+            return f"Era {i + 1}"
+        a, b = d0.strftime("%b %d"), d1.strftime("%b %d")
+        return a if a == b else f"{a} – {b}"
+
+    out = []
+    for i, sids in enumerate(chunks):
+        if not sids:
+            continue
+        sub = df[df["session_id"].isin(sids)]
+        if not sub.empty:
+            out.append((_label(sids, i), sub))
+    return out
+
+
+def _render_rings(fig, ax, df, club_colors, font_scale, order, offline_col, y_col,
+                  dist_pref, color_pref, u="yds"):
+    """One solid 80% covariance ring per group over a faded scatter. The
+    group is whatever the Color dropdown says: per club (bag view), per era
+    (trend view — watch the centers climb and the rings tighten), or per
+    effort band. The legend carries each group's mean distance and offline
+    spread, so the trend is numbers as well as geometry."""
+    groups = []  # (label, sub, color)
+    if color_pref == COLOR_TIMELINE:
+        eras = _era_groups(df)
+        cmap = colormaps["plasma"]
+        n = len(eras)
+        for i, (label, sub) in enumerate(eras):
+            frac = 0.5 if n == 1 else 0.15 + 0.7 * (i / (n - 1))
+            groups.append((label, sub, cmap(frac)))
+    elif color_pref == COLOR_EFFORT:
+        bands = effort_bands(df)
+        for band in (EFFORT_SMOOTH, EFFORT_MID, EFFORT_FLAT):
+            sub = df[bands == band]
+            if not sub.empty:
+                groups.append((band, sub, EFFORT_BAND_COLORS[band]))
+    else:
+        for club in order:
+            sub = df[df["club"] == club]
+            if not sub.empty:
+                groups.append((str(club), sub, club_colors.get(club, Colors.CLUB_FALLBACK)))
+
+    legend_colors: dict[str, object] = {}
+    legend_order: list[str] = []
+    for label, sub, color in groups:
+        sub = sub[sub[offline_col].notna() & sub[y_col].notna()].reset_index(drop=True)
+        if sub.empty:
+            continue
+        sc = ax.scatter(sub[offline_col], sub[y_col], c=[to_rgba(color)] * len(sub),
+                        s=26, alpha=0.35, edgecolor="none", zorder=1)
+
+        def _tooltip(row, label=label):
+            club = str(row.get("club", ""))
+            lines = [f"{club} — {label}" if club and club != label else label,
+                     f"{dist_pref}: {row[y_col]:.0f} {u}",
+                     f"Offline: {row[offline_col]:+.1f} {u}"]
+            if pd.notna(row.get("speed_pct")):
+                lines.append(f"Effort: {row['speed_pct']:.0f}% of your max")
+            if "session_date" in row.index and pd.notna(row["session_date"]):
+                lines.append(pd.to_datetime(row["session_date"]).strftime("%b %d, %Y"))
+            return "\n".join(lines)
+
+        attach_hover_tooltip(fig, sc, sub, _tooltip, font_scale)
+        _draw_ring(ax, sub[offline_col], sub[y_col], color)
+
+        spread = sub[offline_col].std()
+        spread_txt = f"±{spread:.0f} {u}" if pd.notna(spread) else "n/a"
+        leg = f"{label} · {sub[y_col].mean():.0f} {u} · {spread_txt} offline"
+        legend_colors[leg] = color
+        legend_order.append(leg)
+
+    club_legend(ax, legend_colors, legend_order, font_scale, loc=_LEGEND_LOC)
+
+
+def _render_compare(fig, ax, df, font_scale, offline_col, y_col, dist_pref, detail, u="yds"):
+    """One club, three heat maps — a KDE cloud per effort tercile, so "does
+    swinging harder widen my misses?" is answered by shapes AND numbers: the
+    legend carries each band's offline spread. Simple detail mode collapses
+    each band to a mean marker with std whiskers instead of clouds."""
+    bands = [b for b in (EFFORT_SMOOTH, EFFORT_MID, EFFORT_FLAT)
+             if (df["effort_band"] == b).any()]
+    legend_colors: dict[str, str] = {}
+    legend_order: list[str] = []
+
+    for band in bands:
+        sub = df[df["effort_band"] == band].reset_index(drop=True)
+        color = EFFORT_BAND_COLORS[band]
+        c_rgba = to_rgba(color)
+
+        if detail == "Simple":
+            mx, my = sub[offline_col].mean(), sub[y_col].mean()
+            sx = sub[offline_col].std() if len(sub) > 1 else 0.0
+            sy = sub[y_col].std() if len(sub) > 1 else 0.0
+            ax.errorbar(mx, my, xerr=sx, yerr=sy, fmt="none", ecolor=color,
+                        alpha=0.6, elinewidth=1.6, capsize=4, zorder=2)
+            ax.scatter([mx], [my], s=150, c=[c_rgba], edgecolor="black",
+                       linewidth=0.8, zorder=3)
+        else:
+            # One bold ring per band over faded dots — with three bands the
+            # KDE clouds this used to draw just muddied each other; the ring
+            # IS the dispersion, so it gets the ink.
+            sc = ax.scatter(sub[offline_col], sub[y_col], c=[c_rgba] * len(sub),
+                            s=28, alpha=0.4, edgecolor="none", zorder=1)
+            _draw_ring(ax, sub[offline_col], sub[y_col], color)
+
+            def _tooltip(row, band=band):
+                lines = [f"{row['club']} — {band}",
+                         f"{dist_pref}: {row[y_col]:.0f} {u}",
+                         f"Offline: {row[offline_col]:+.1f} {u}"]
+                if pd.notna(row.get("speed_pct")):
+                    lines.append(f"Effort: {row['speed_pct']:.0f}% of your max")
+                return "\n".join(lines)
+
+            attach_hover_tooltip(fig, sc, sub, _tooltip, font_scale)
+
+        # The legend is where the comparison becomes a number: offline spread
+        # per band, so a widening cloud can be read off without squinting.
+        spread = sub[offline_col].std()
+        spread_txt = f"±{spread:.0f} {u} offline" if pd.notna(spread) else "spread n/a"
+        label = f"{band} · {spread_txt} · {len(sub)} shots"
+        legend_colors[label] = color
+        legend_order.append(label)
+
+    club_legend(ax, legend_colors, legend_order, font_scale, loc=_LEGEND_LOC)
 
 
 def _render_simple(ax, df, club_colors, font_scale, order, offline_col, y_col, dist_pref, config, u="yds"):

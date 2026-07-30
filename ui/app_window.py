@@ -2411,7 +2411,7 @@ class SimAnalyticsApp:
             ).pack(side=tk.RIGHT, padx=(10, 4))
             theme.body_label(top_bar, "Distance:", color=Colors.TEXT_MUTED).pack(side=tk.RIGHT)
             SingleSelectDropdown(
-                top_bar, ["In-Depth", "Simple"], entry["detail_var"], on_change=update_local,
+                top_bar, dispersion.DETAIL_OPTIONS, entry["detail_var"], on_change=update_local,
                 accent=Colors.INFO, width=120,
             ).pack(side=tk.RIGHT, padx=(10, 4))
             theme.body_label(top_bar, "Detail:", color=Colors.TEXT_MUTED).pack(side=tk.RIGHT)

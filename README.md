@@ -18,7 +18,7 @@
 
 | Category | Dashboards |
 |---|---|
-| Metrics | Dispersion · Trajectory · Club Gapping · Swing Efficiency · Shot Quality · Shot & Club Trends |
+| Metrics | Dispersion · Trajectory · Club Gapping · Swing Efficiency · Shot Quality · Session Stats |
 | Optimization | Launch & Spin · Session Comparison · Shot Shape |
 | Club Fitting | Club Comparison (adapter A/B testing with live capture) |
 | Speed Training | Cruising speed, fatigue curve, speed vs. strike quality, long-term progression |

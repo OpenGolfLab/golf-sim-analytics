@@ -1,4 +1,4 @@
-"""Shot & Club Trends — shots per club per calendar day across your whole
+"""Session Stats — shots per club per calendar day across your whole
 history (a club-colored stacked bar, one bar per day you practiced), plus a
 row of summary tiles beneath it.
 
@@ -18,7 +18,7 @@ from data.columns import CARRY_ALIASES, TOTAL_ALIASES, find_col
 from ui.charts._shared import club_legend, style_axes
 from ui.empty_state import show_message
 
-NAME = "Shot & Club Trends"
+NAME = "Session Stats"
 CATEGORY = "Metrics"
 COLUMN = "left"
 HAS_COLOR = False

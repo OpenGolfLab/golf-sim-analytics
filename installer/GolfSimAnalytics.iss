@@ -102,6 +102,16 @@ DisableProgramGroupPage=yes
 DisableReadyPage=yes
 DisableReadyMemo=yes
 DisableFinishedPage=yes
+; Upgrading while the app is open is the NORMAL path (the in-app update
+; notice sends people here with the app running), so don't stop to ask about
+; it: force closes the running app gracefully (WM_CLOSE via Restart Manager,
+; not a kill) instead of showing the "applications using files" page. Restart
+; is left to the [Run] entry below — with RestartApplications on, Restart
+; Manager could relaunch the old exe mid-install and re-lock the very file
+; being replaced (seen in the wild on the v1.5.0 rollout), and a successful
+; install would end with two copies open.
+CloseApplications=force
+RestartApplications=no
 ; Everything the app needs is bundled in dist\ (built by build_exe.bat);
 ; nothing else on the target machine is required.
 ArchitecturesInstallIn64BitMode=x64compatible
