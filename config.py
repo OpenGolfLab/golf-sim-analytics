@@ -18,7 +18,7 @@ from pathlib import Path
 # bundles (see contribute.py) so shared data is traceable to a build. Also
 # shown at the bottom of the Settings panel, so "which build am I actually
 # running?" is answerable at a glance — bump this on any user-visible change.
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 
 # OpenGolfLab intake Worker. Paste your deployed Cloudflare Worker URL here to
 # enable one-click "Send to OpenGolfLab" in the Contribute dialog. Leave blank
