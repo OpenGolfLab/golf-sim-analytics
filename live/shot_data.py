@@ -37,6 +37,7 @@ from pathlib import Path
 import pandas as pd
 
 from config import normalize_club_name, resolve_club_index
+from data import players
 
 log = logging.getLogger(__name__)
 
@@ -118,6 +119,11 @@ def flatten_shot(raw_shot: dict, club_lookup=None) -> dict:
         # "paynes_valley_gsp"); None for practice-range shots, which don't
         # carry it. See data/on_course.humanize_course() for the display name.
         "course": raw_shot.get("CourseKey"),
+        # The GSPro profile that hit this shot — a real name on course, the
+        # constant sentinel "Practice" on the range (data/players.py resolves
+        # which is which). Kept per-shot rather than derived at archive time so
+        # the raw record and the Parquet always agree about who was hitting.
+        "player_name": raw_shot.get("PlayerName"),
     }
     if club_lookup is not None:
         # Fill in clubspeed / smashfactor / aoa (and the real club name) from
@@ -296,4 +302,8 @@ def archive_round(
         "club_data_shots": club_data_shots,
         "parquet_path": parquet_path,
         "raw_path": raw_path,
+        # The golfer GSPro named, when it named one (on-course rounds only —
+        # see data/players.py). "" on the range, where the caller falls back to
+        # whoever the Player selector says is hitting.
+        "player": players.player_from_shots(raw_shots),
     }

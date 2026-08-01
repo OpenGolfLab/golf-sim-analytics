@@ -90,6 +90,16 @@ DEFAULTS: dict = {
     # auto-detected location (config.GSPRO_DEFAULT_DATA_DIR); only non-standard
     # GSPro setups need to set this.
     "gspro_data_dir": "",
+    # Multi-player household support. "active_player" is who the app assumes is
+    # hitting: every newly captured session (range, CSV or live) is stamped with
+    # it, because GSPro only names the golfer on course rounds — see
+    # data/players.py for why attribution has to be hybrid. Blank means nobody
+    # has been named yet, which is the single-golfer case and stamps nothing.
+    # "player_filter" is the dashboards' current view (a name, or
+    # filters.PLAYER_ALL); persisted so the app reopens on the golfer you were
+    # last looking at instead of resetting to the whole household.
+    "active_player": "",
+    "player_filter": "All Players",
     # Keep on-course rounds (which include chips, punches, recovery shots)
     # out of the practice-analytics dashboards so they don't taint the
     # "pure your swing" historical data. On by default: the whole point of

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from data import players as players_mod
 from data.columns import CARRY_ALIASES, find_col
 
 TIME_ALL = "All Time"
@@ -27,6 +28,11 @@ TIME_FILTER_OPTIONS = [
 ]
 
 CLUB_ALL = "All Clubs"
+
+# Multi-player households share one history; PLAYER_ALL means "don't filter by
+# golfer at all". The player column itself is attached at load time from a
+# sidecar, never stored in Parquet — see data/players.py.
+PLAYER_ALL = "All Players"
 
 QUALITY_ALL = "All Shots"
 QUALITY_DROP_WORST_10 = "Drop Worst 10%"
@@ -117,6 +123,22 @@ def _apply_club_filter(df: pd.DataFrame, club_filter) -> pd.DataFrame:
     ]
 
 
+def _apply_player_filter(df: pd.DataFrame, player_filter) -> pd.DataFrame:
+    """Keep only the selected golfer's shots.
+
+    ``player_filter`` is PLAYER_ALL/None (no filtering) or one player name.
+    ``players.UNASSIGNED`` ("") is a selectable value in its own right — it
+    means "sessions nobody has claimed yet", so it filters like any other name
+    rather than being treated as "no filter".
+    """
+    if player_filter is None or player_filter == PLAYER_ALL:
+        return df
+    if players_mod.PLAYER_COLUMN not in df.columns:
+        return df
+    col = df[players_mod.PLAYER_COLUMN].fillna(players_mod.UNASSIGNED).astype(str)
+    return df[col == str(player_filter)]
+
+
 def _apply_quality_filter(df: pd.DataFrame, quality_filter: str) -> pd.DataFrame:
     if quality_filter == QUALITY_ALL or "club" not in df.columns:
         return df
@@ -136,15 +158,22 @@ def filter_master_data(
     club_filter: str,
     quality_filter: str,
     ignore_global_club: bool = False,
+    player_filter=None,
 ) -> pd.DataFrame:
-    """Apply the global Time / Club / Shot-Quality filters to a DataFrame.
+    """Apply the global Player / Time / Club / Shot-Quality filters to a frame.
 
     ignore_global_club=True is used by the Club Gapping dashboard, which
     has its own per-club checkbox menu instead of the global club filter.
+
+    Player runs FIRST and deliberately so: the session-relative time filters
+    ("Last 3 Sessions") have to count the selected golfer's sessions, not the
+    household's, or picking a player who last played in March would show three
+    sessions that all belong to somebody else.
     """
     if df.empty:
         return df
 
+    df = _apply_player_filter(df, player_filter)
     df = _apply_time_filter(df, time_filter)
     if not ignore_global_club:
         df = _apply_club_filter(df, club_filter)

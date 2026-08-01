@@ -49,6 +49,7 @@ import contribute
 from config import Colors, get_club_rank
 from data import filters as filters_mod
 from data import adapter_tags, edits as edits_mod, on_course, settings as settings_mod
+from data import players as players_mod
 from data import units as units_mod
 from data.analytics import EnvironmentalNormalizer, ShotScorer
 from data.columns import BALL_SPEED_ALIASES, CLUB_SPEED_ALIASES, find_col
@@ -84,6 +85,7 @@ from ui.components import DropdownPanel, MultiSelectDropdown, SingleSelectDropdo
 from ui.dialogs import show_toast
 from ui.empty_state import show_message
 from ui.feedback_dialog import open_feedback_dialog
+from ui.player_dialog import PlayerAssignmentDialog
 from ui.home_page import build_home_page, course_banner
 
 log = logging.getLogger(__name__)
@@ -234,6 +236,16 @@ class SimAnalyticsApp:
 
         self.global_time_var = tk.StringVar(value=filters_mod.TIME_ALL)
         self.global_quality_var = tk.StringVar(value=filters_mod.QUALITY_ALL)
+        # Multi-player household: which golfer the dashboards are showing, and
+        # who the app assumes is hitting right now. Both persist — reopening on
+        # somebody else's data, or silently filing your shots under the last
+        # person who used the sim, are equally bad. See data/players.py.
+        self.global_player_var = tk.StringVar(
+            value=self._settings.get("player_filter", filters_mod.PLAYER_ALL))
+        self.settings_active_player = tk.StringVar(
+            value=self._settings.get("active_player", ""))
+        # {session_id: player} sidecar, loaded with the data (load_master_data).
+        self._player_tags: dict[str, str] = {}
         # Environmental normalization: opt-in via Settings (off by default so
         # the "Today's Temp" box stays hidden and out of the way). When the
         # feature is on, distances normalize whenever the temp field holds a
@@ -925,35 +937,50 @@ class SimAnalyticsApp:
             lbl.grid(row=0, column=column, padx=pad)
             return lbl
 
-        _filter_label("Time", 0)
+        # Player leads the row: it scopes everything to its right, and reading
+        # a dashboard without knowing whose shots it holds is worse than any
+        # other filter being wrong. Hidden entirely on a single-golfer install
+        # (see _refresh_player_filter) so a solo user never sees a control that
+        # only has one possible value.
+        self.player_filter_label = _filter_label("Player", 0)
+        self.global_player_selector = SingleSelectDropdown(
+            filter_frame, [filters_mod.PLAYER_ALL], self.global_player_var,
+            on_change=self._on_player_filter_changed, width=150,
+            accent=Colors.INFO,
+        )
+        self.global_player_selector.grid(row=0, column=1)
+        self.player_filter_label.grid_remove()
+        self.global_player_selector.grid_remove()
+
+        _filter_label("Time", 2, pad=(BAR_GAP_GROUP, 4))
         SingleSelectDropdown(
             filter_frame, filters_mod.TIME_FILTER_OPTIONS, self.global_time_var,
             on_change=self._on_filter_changed, width=150,
-        ).grid(row=0, column=1)
+        ).grid(row=0, column=3)
 
-        _filter_label("Club", 2, pad=(BAR_GAP_GROUP, 4))
+        _filter_label("Club", 4, pad=(BAR_GAP_GROUP, 4))
         self.global_club_selector = MultiSelectDropdown(
             filter_frame, self.global_club_vars, on_change=self._on_filter_changed,
             width=140, item_label="Clubs", item_colors=config.CLUB_COLORS,
         )
-        self.global_club_selector.grid(row=0, column=3)
+        self.global_club_selector.grid(row=0, column=5)
 
-        _filter_label("Quality", 4, pad=(BAR_GAP_GROUP, 4))
+        _filter_label("Quality", 6, pad=(BAR_GAP_GROUP, 4))
         SingleSelectDropdown(
             filter_frame, filters_mod.QUALITY_FILTER_OPTIONS, self.global_quality_var,
             on_change=self._on_filter_changed, width=190,
-        ).grid(row=0, column=5)
+        ).grid(row=0, column=7)
 
         # "Today's Temp": type the temperature to normalize distances to
         # standard conditions. Shown only when enabled in Settings; the value
         # in the box is the switch (blank = no normalization).
-        self.temp_norm_label = _filter_label("Today's Temp", 6, pad=(BAR_GAP_GROUP, 4))
+        self.temp_norm_label = _filter_label("Today's Temp", 8, pad=(BAR_GAP_GROUP, 4))
         attach_tooltip(self.temp_norm_label,
                        "Enter today's temperature — this normalizes your carry/total "
                        "distances to standard conditions so sessions hit on different "
                        "days compare fairly.")
         self.temp_norm_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
-        self.temp_norm_frame.grid(row=0, column=7)
+        self.temp_norm_frame.grid(row=0, column=9)
         # No placeholder_text: CTkEntry ignores it once a textvariable is bound,
         # so it never showed. A blank field means "off" (conveyed by the label's
         # tooltip); the muted "°F" suffix labels the unit.
@@ -1099,6 +1126,149 @@ class SimAnalyticsApp:
             self._style_nav_item(entry)
 
     def _on_filter_changed(self, _value=None):
+        self.refresh_all_active_plots()
+
+    # ------------------------------------------------------------------
+    # Multi-player (see data/players.py)
+    # ------------------------------------------------------------------
+    def _backfill_players(self, data_dir, full_df):
+        """Self-heal session attribution, then claim what's left.
+
+        Both passes are idempotent — a session that already has a player is
+        never touched, so a user's manual re-assignment can't be undone by a
+        later launch. Failures are logged and swallowed: attribution is a
+        convenience layer, and no error in it should stop data from loading.
+        """
+        try:
+            players_mod.backfill_from_archives(data_dir, config.LIVE_ROUNDS_RAW_DIR)
+        except Exception:
+            log.exception("Player backfill from raw archives failed — continuing")
+        active = players_mod.normalize_name(self.settings_active_player.get())
+        if not active:
+            # Upgrade path: nobody has named themselves yet, so adopt the golfer
+            # who owns the most rounds GSPro already named. Without this an
+            # existing single-golfer history would land entirely in "Unassigned"
+            # on first launch after the update — technically correct, and a
+            # terrible way to greet someone who never asked for multi-player.
+            active = players_mod.primary_player(data_dir)
+            if active:
+                self.settings_active_player.set(active)
+                settings_mod.set("active_player", active)
+                log.info("Adopted %r as the active player from GSPro's own "
+                         "round data", active)
+        if not active or full_df.empty or "session_id" not in full_df.columns:
+            return
+        try:
+            players_mod.claim_unassigned(
+                data_dir, full_df["session_id"].astype(str).unique(), active)
+        except Exception:
+            log.exception("Claiming unassigned sessions failed — continuing")
+
+    def _attribute_session(self, session_id: str, gspro_name: str = "") -> str:
+        """File a just-captured session under a golfer, and return that name.
+
+        GSPro's own PlayerName wins when there is one (on-course rounds), since
+        it's what the golfer actually selected in GSPro rather than what this
+        app was left set to. Otherwise the active player is used. Neither
+        available means the session stays unassigned, which is exactly right
+        for a single-golfer install that has never opened this feature.
+
+        A name GSPro supplies also becomes the active player: on-course rounds
+        are the only place the app can learn a real name by itself, so that's
+        how a second golfer in the house gets discovered without anyone typing
+        anything.
+        """
+        name = players_mod.normalize_name(gspro_name)
+        if name:
+            if name != players_mod.normalize_name(self.settings_active_player.get()):
+                self.settings_active_player.set(name)
+                settings_mod.set("active_player", name)
+        else:
+            name = players_mod.normalize_name(self.settings_active_player.get())
+        if not name:
+            return ""
+        try:
+            players_mod.save_player(self._data_dir(), session_id, name)
+        except OSError:
+            log.exception("Could not record the player for session %s", session_id)
+        return name
+
+    def _known_players(self):
+        """Every golfer with data, plus whoever is set as active (so a name
+        typed in Settings is selectable before their first session lands)."""
+        names = set(players_mod.available_players(self._full_df))
+        active = players_mod.normalize_name(self.settings_active_player.get())
+        if active:
+            names.add(active)
+        return sorted(names)
+
+    def _refresh_player_filter(self):
+        """Rebuild the Player dropdown's options, and show or hide the whole
+        control. It stays hidden until there's an actual choice to make — one
+        golfer with everything attributed is the overwhelmingly common case,
+        and that user should never see a filter that can't do anything."""
+        selector = getattr(self, "global_player_selector", None)
+        if selector is None:
+            return
+        names = self._known_players()
+        options = [filters_mod.PLAYER_ALL, *names]
+        if players_mod.has_unassigned(self._full_df):
+            # Only offered when it would actually match something. Listed last:
+            # it's a cleanup bucket, not a golfer.
+            options.append(players_mod.UNASSIGNED_LABEL)
+        selector.set_options(options)
+        # A player can disappear (their last session gets reassigned) while
+        # they're the current view — fall back rather than filter to nothing.
+        if self.global_player_var.get() not in options:
+            self.global_player_var.set(filters_mod.PLAYER_ALL)
+            settings_mod.set("player_filter", filters_mod.PLAYER_ALL)
+        if len(options) > 1:
+            self.player_filter_label.grid()
+            selector.grid()
+        else:
+            self.player_filter_label.grid_remove()
+            selector.grid_remove()
+
+    def _empty_filter_hint(self) -> str:
+        """What to loosen when a dashboard filters down to nothing.
+
+        Names the Player filter first when one is active, and calls out the
+        specific dead end a household hits: a golfer whose only sessions are
+        course rounds looks like they have no data at all here, because the
+        practice dashboards exclude course play by design. Pointing at Time and
+        Club in that situation sends the user to fiddle with the wrong controls.
+        """
+        who = self._selected_player()
+        if who is None:
+            return "Loosen the Time / Club / Shot Quality filters above"
+        label = players_mod.UNASSIGNED_LABEL if who == players_mod.UNASSIGNED else who
+        if (self.settings_exclude_on_course.get() and not self._full_df.empty
+                and "round_type" in self._full_df.columns):
+            theirs = self._full_df[
+                self._full_df.get(players_mod.PLAYER_COLUMN, "").fillna("") == who]
+            if not theirs.empty and (theirs["round_type"] == "on_course").all():
+                return (f"{label} has only on-course rounds — see them in "
+                        f"On-Course Play, or turn off “Keep on-course rounds out "
+                        f"of practice data” in Settings")
+        return f"No shots for {label} — switch Player, or loosen Time / Club / Quality"
+
+    def _selected_player(self):
+        """The filter value data/filters wants: None for "everyone", "" for the
+        unassigned bucket, else the golfer's name."""
+        choice = self.global_player_var.get()
+        if choice == filters_mod.PLAYER_ALL:
+            return None
+        if choice == players_mod.UNASSIGNED_LABEL:
+            return players_mod.UNASSIGNED
+        return choice
+
+    def _on_player_filter_changed(self, _value=None):
+        settings_mod.set("player_filter", self.global_player_var.get())
+        # Records are per-golfer too — a household's PB toast should celebrate
+        # your best drive, not your brother's.
+        self._record_club_speed = self._column_max(CLUB_SPEED_ALIASES)
+        self._record_ball_speed = self._column_max(BALL_SPEED_ALIASES)
+        self.build_grid()
         self.refresh_all_active_plots()
 
     def _selected_global_clubs(self):
@@ -1251,7 +1421,13 @@ class SimAnalyticsApp:
         # Seeds the all-time speed PBs from the *full* history (incl. on-course
         # rounds): a drive striped on the course is still a real personal best,
         # so a later practice swing shouldn't falsely flash "new record."
-        df = self._full_df
+        #
+        # Scoped to the selected golfer, though — in a household the whole point
+        # of a PB toast is that it's YOURS, and measuring against the fastest
+        # swinger in the house means everyone else never sees one.
+        df = filters_mod.filter_master_data(
+            self._full_df, filters_mod.TIME_ALL, filters_mod.CLUB_ALL,
+            filters_mod.QUALITY_ALL, player_filter=self._selected_player())
         col = find_col(df, aliases) if not df.empty else None
         if not col:
             return None
@@ -1325,6 +1501,16 @@ class SimAnalyticsApp:
         # Merge in driver adapter tags (isolated sidecar; see data/adapter_tags).
         # Keeps the core loader untouched — untagged rows just get adapter="".
         full = adapter_tags.apply_tags(full, adapter_tags.load_tags(data_dir))
+        # Who hit each session (second isolated sidecar; see data/players.py).
+        # Two self-healing passes run first, both no-ops once they've done their
+        # work: on-course rounds recover GSPro's PlayerName from the raw JSON
+        # archives, then any session still unclaimed is handed to the active
+        # player. The second is what keeps an existing single-golfer history
+        # looking exactly as it did before the app knew what a player was —
+        # without it, every dashboard would read "Unassigned" after the update.
+        self._backfill_players(data_dir, full)
+        self._player_tags = players_mod.load_players(data_dir)
+        full = players_mod.apply_players(full, self._player_tags)
         # Reversible edits: stable shot_uid, then hide deleted sessions/shots
         # and apply club overrides (data/edits.py — Parquet never touched).
         full = edits_mod.add_shot_uid(full)
@@ -1348,6 +1534,7 @@ class SimAnalyticsApp:
                 self.global_club_vars.setdefault(c, tk.BooleanVar(value=True))
                 self.gapping_club_vars.setdefault(c, tk.BooleanVar(value=True))
             self.global_club_selector.refresh_options()
+        self._refresh_player_filter()
 
         # Seed the all-time speed records from history so live PBs are measured
         # against the real best, not just this session.
@@ -1548,6 +1735,7 @@ class SimAnalyticsApp:
         CSV-ingested session would) and to a raw JSON snapshot tagged with
         round_type, under config.LIVE_ROUNDS_RAW_DIR."""
         self.live_shot_buffer.clear()
+        self._attribute_session(info["session_id"], gspro_name=info.get("player"))
         label = "practice" if info["round_type"] == "practice" else "on-course"
         plural = "s" if info["shot_count"] != 1 else ""
         show_toast(
@@ -1635,11 +1823,14 @@ class SimAnalyticsApp:
             src, time_val = pd.DataFrame(self.live_shot_buffer), filters_mod.TIME_ALL
         else:
             src = self.master_df
+        player = self._selected_player()
         base = filters_mod.filter_master_data(
             src, time_val, self._selected_global_clubs(), self.global_quality_var.get(),
+            player_filter=player,
         )
         gap = filters_mod.filter_master_data(
             src, time_val, None, self.global_quality_var.get(), ignore_global_club=True,
+            player_filter=player,
         )
         base, gap = self._drop_warmup(base), self._drop_warmup(gap)
         temp = self._normalize_temp()
@@ -1666,6 +1857,134 @@ class SimAnalyticsApp:
             panel = DropdownPanel(self.settings_button, self._build_settings_body, width=400)
             self._settings_panel = panel
         panel.toggle()
+
+    def _build_player_setting(self, card):
+        """"Who's hitting" — the active player, plus a way to re-file sessions.
+
+        This is the *write* half of multi-player support; the top-bar Player
+        dropdown is the read half. They're deliberately separate controls: the
+        golfer you're currently looking at and the golfer currently swinging
+        are different questions, and conflating them means reviewing your
+        brother's dispersion quietly files your next session under his name.
+        """
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x")
+        theme.body_label(row, "Who's hitting", color=Colors.TEXT_PRIMARY,
+                         font=theme.font("label")).pack(side="left", padx=(0, 24))
+        entry = ctk.CTkEntry(
+            row, textvariable=self.settings_active_player, width=150,
+            height=theme.CONTROL_HEIGHT, corner_radius=theme.CONTROL_RADIUS,
+            font=theme.font("body"), fg_color="transparent",
+            border_color=Colors.BORDER, border_width=1,
+        )
+        entry.pack(side="right")
+
+        theme.body_label(
+            card, "Every session you capture from here on is filed under this "
+            "name, so a household can share one sim and still get separate "
+            "numbers. On-course rounds name themselves from your GSPro profile. "
+            "Leave it blank if you're the only golfer.",
+            color=Colors.TEXT_MUTED, font=theme.font("caption"),
+            wraplength=380, justify="left").pack(anchor="w", pady=(6, 6))
+
+        known = self._known_players()
+        if known:
+            theme.body_label(
+                card, "Golfers on this sim: " + ", ".join(known),
+                color=Colors.TEXT_MUTED, font=theme.font("caption"),
+                wraplength=380, justify="left").pack(anchor="w", pady=(0, 6))
+
+        theme.ghost_button(
+            card, text="Assign past sessions…", width=170,
+            command=self._open_player_assignment,
+        ).pack(anchor="w", pady=(0, 12))
+
+        # Persist on a var trace for the same reason display_name does: this
+        # entry lives in an overrideredirect popup, where Windows drops keyboard
+        # events (a paste fires no KeyRelease at all), but the textvariable
+        # updates regardless. Guarded so it's attached exactly once even though
+        # the settings body is rebuilt every time the panel opens.
+        if not getattr(self, "_active_player_traced", False):
+            self.settings_active_player.trace_add("write", self._on_active_player_changed)
+            self._active_player_traced = True
+
+    def _on_active_player_changed(self, *_args):
+        name = players_mod.normalize_name(self.settings_active_player.get())
+        settings_mod.set("active_player", name)
+        # A brand-new name has no sessions yet, so it wouldn't appear in the
+        # top-bar filter until one lands — refresh so it's selectable straight
+        # away (see _known_players).
+        self._refresh_player_filter()
+
+    def _open_player_assignment(self):
+        """Re-file existing sessions under a different golfer.
+
+        The escape hatch for everything auto-attribution can't know: the range
+        session your son hit while the app still said your name, or a whole
+        pre-upgrade history that needs splitting. Assignments write to the
+        sidecar only — Parquet is never rewritten, so nothing here can damage
+        shot data.
+        """
+        if self._full_df.empty or "session_id" not in self._full_df.columns:
+            show_toast(self.root, "No sessions to assign yet.", tone="info")
+            return
+        PlayerAssignmentDialog(
+            self.root,
+            sessions=self._player_session_options(),
+            players=self._known_players(),
+            current=dict(self._player_tags),
+            on_apply=self._apply_player_assignments,
+        )
+
+    def _player_session_options(self):
+        """(session_id, label) for EVERY session, newest first.
+
+        Deliberately built off _full_df rather than reusing _session_options():
+        that one reads master_df, which drops on-course rounds whenever the
+        "keep course play out of practice" setting is on — and a dialog for
+        assigning sessions that silently omits every round you played would be
+        the opposite of useful. Rounds are marked so they're distinguishable
+        from range work at a glance.
+        """
+        df = self._full_df
+        if df.empty or "session_id" not in df.columns:
+            return []
+        info = []
+        for sid, sub in df.groupby("session_id"):
+            date = (pd.to_datetime(sub["session_date"], errors="coerce").max()
+                    if "session_date" in sub.columns else pd.NaT)
+            date_lbl = date.strftime("%b %d, %Y") if pd.notna(date) else "undated"
+            kind = ""
+            if "round_type" in sub.columns and (sub["round_type"] == "on_course").any():
+                kind = " · round"
+            label = f"{date_lbl} · {len(sub)} shots{kind}"
+            info.append((sid, date if pd.notna(date) else pd.Timestamp.min, label))
+        info.sort(key=lambda t: t[1], reverse=True)
+        seen: dict[str, int] = {}
+        out = []
+        for sid, _dt, label in info:
+            n = seen.get(label, 0)
+            seen[label] = n + 1
+            out.append((sid, label if n == 0 else f"{label} ({n + 1})"))
+        return out
+
+    def _apply_player_assignments(self, assignments: dict[str, str]) -> None:
+        """Persist a batch of {session_id: player} changes and repaint."""
+        if not assignments:
+            return
+        try:
+            players_mod.save_players(self._data_dir(), assignments)
+        except OSError:
+            log.exception("Could not save player assignments")
+            show_toast(self.root, "Couldn't save those assignments — "
+                                  "check the data folder is writable.", tone="error")
+            return
+        n = len(assignments)
+        show_toast(self.root, f"Reassigned {n} session{'s' if n != 1 else ''}.",
+                   tone="success")
+        self.load_master_data()
+        self.build_grid()
+        self.refresh_all_active_plots()
 
     def _build_display_name_setting(self, card):
         """The Display name field: the one public thing about a contribution.
@@ -1768,6 +2087,7 @@ class SimAnalyticsApp:
         body (see ui.components.DropdownPanel); ``close`` dismisses the panel."""
         theme.section_label(card, "Settings", color=Colors.INFO).pack(anchor="w", pady=(2, 10))
 
+        self._build_player_setting(card)
         self._build_display_name_setting(card)
 
         # Display scale — persists across launches (see data/settings.py). Lets
@@ -2669,7 +2989,7 @@ class SimAnalyticsApp:
                 render_extra["community_as_of"] = self._community_as_of
             if df_filtered.empty and name not in (LIVE_NAME, ONCOURSE_NAME, COMMUNITY_NAME):
                 show_message(fig, "No data matching filters", font_scale,
-                             hint="Loosen the Time / Club / Shot Quality filters above")
+                             hint=self._empty_filter_hint())
             else:
                 entry["def"].render(fig, df_filtered, club_colors, font_scale, entry,
                                     **render_extra)

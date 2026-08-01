@@ -437,6 +437,19 @@ class SingleSelectDropdown(_PopupDropdownBase):
     def _refresh_button_label(self):
         self.button.configure(text=f"{self.variable.get()} ▾")
 
+    def set_options(self, options: list[str]):
+        """Replace the choice list — for dropdowns whose options come from the
+        data (e.g. the Player filter, which learns names as sessions land)
+        rather than from a fixed constant. Mirrors
+        MultiSelectDropdown.refresh_options: reopens an open popup so it can't
+        keep showing a stale list.
+        """
+        self.options = list(options)
+        self._refresh_button_label()
+        if self._popup is not None and self._popup.winfo_exists():
+            self._close_popup()
+            self._open_popup()
+
     def _open_popup(self):
         card = self._open_popup_shell()
         list_frame = ctk.CTkFrame(card, fg_color="transparent")

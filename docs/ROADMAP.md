@@ -366,8 +366,12 @@ Effort: **S** plus an afternoon. The window closes as those users settle.
    (Note the market does price the *sentence* at ~$2/mo.)
 4. **Mandatory accounts / portal connections.** This app works the moment it's
    installed. That's half the positioning.
-5. **Multi-player household support this quarter.** Real, but it's a data-model
-   change touching every view, and it isn't why anyone would switch.
+5. ~~**Multi-player household support this quarter.**~~ **Shipped** — and it
+   turned out not to be the data-model change this entry feared. Attribution
+   rides a `{session_id: player}` sidecar (`data/players.py`), the same isolated
+   pattern as adapter tags, so Parquet was never touched and the views needed
+   one filter argument rather than a rewrite. GSPro names the golfer on course
+   rounds; everything else is stamped with the active player.
 
 ---
 
