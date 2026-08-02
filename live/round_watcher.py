@@ -73,6 +73,7 @@ class LiveRoundWatcher:
         lm_log_dir: Path | None = None,
         club_data_retries: int = 0,
         club_data_retry_interval: float = 0.4,
+        idle_archive_seconds: float | None = None,
     ):
         self.round_file = round_file
         self.data_dir = data_dir
@@ -89,6 +90,10 @@ class LiveRoundWatcher:
         # app passes config.LIVE_CLUB_DATA_RETRIES.
         self.club_data_retries = club_data_retries
         self.club_data_retry_interval = club_data_retry_interval
+        # Seconds of no new shots after which the buffered session archives
+        # itself (config.LIVE_IDLE_ARCHIVE_SECONDS). None disables it, which is
+        # the default so existing callers and tests keep the old behavior.
+        self.idle_archive_seconds = idle_archive_seconds
         # Optional live.gspro_db.ClubDataLookup — enriches shots with the club
         # speed / smash / AoA currentRound.dat lacks (see live/gspro_db.py).
         self.club_lookup = club_lookup
@@ -118,6 +123,14 @@ class LiveRoundWatcher:
         self._state_file = self.raw_archive_dir / ".watcher_state.json"
         self._last_archived_mtime = self._load_last_archived_mtime()
         self._already_archived_current = False
+        # Idle auto-archive (see _maybe_archive_idle). _last_shot_at is when the
+        # buffer last grew; _archived_shot_count is how many shots the current
+        # session's archive on disk holds, so a resumed session only rewrites
+        # when it actually has something new to say. _session_id pins the
+        # rewrite to the same file.
+        self._last_shot_at: float | None = None
+        self._archived_shot_count = 0
+        self._session_id: str | None = None
 
         self._running = False
         self._thread: threading.Thread | None = None
@@ -149,7 +162,38 @@ class LiveRoundWatcher:
                 self._retry_club_data()
             except Exception:
                 log.exception("Live round watcher club-data retry failed")
+            try:
+                self.archive_if_idle()
+            except Exception:
+                log.exception("Live round watcher idle archive failed")
             time.sleep(self.poll_interval)
+
+    def archive_if_idle(self) -> dict | None:
+        """Archive the buffered session once the shots have stopped.
+
+        This is what makes a finished round appear on its own. The three
+        original archive triggers — GSPro starting the next round, an explicit
+        End Round, and app shutdown — all miss the ordinary case of finishing a
+        round and walking away, which left the session invisible until the app
+        was restarted.
+
+        Archiving here is not a decision that the session is over: if the user
+        comes back and hits more, those shots re-archive into the SAME
+        session_id (see _finalize_buffer), so an early flush costs one extra
+        file write and never splits a session in two.
+        """
+        if self.idle_archive_seconds is None or not self._buffer:
+            return None
+        if self._last_shot_at is None:
+            return None
+        if len(self._buffer) <= self._archived_shot_count:
+            return None
+        if time.monotonic() - self._last_shot_at < self.idle_archive_seconds:
+            return None
+        log.info("Live round watcher: %.0fs since the last shot — archiving "
+                 "the session so it shows up in the dashboards",
+                 self.idle_archive_seconds)
+        return self._finalize_buffer(idle=True)
 
     def check_now(self) -> None:
         """One poll cycle. Safe to call directly (e.g. from tests)
@@ -188,6 +232,10 @@ class LiveRoundWatcher:
             self._first_shot_id = first_id
             self._buffer = list(raw)
             self._seen_shot_ids = {s.get("ShotID") for s in raw}
+            # Start the idle clock now. A session already in progress when the
+            # app opened is exactly the case that needs auto-archiving — the
+            # user may have finished playing before launching the app.
+            self._last_shot_at = time.monotonic()
             # Capture their club data anyway, even though they're not announced
             # as new. This is the "app opened partway through a range session"
             # case: these shots are still going to be archived, and right now is
@@ -218,6 +266,12 @@ class LiveRoundWatcher:
             self._buffer = []
             self._seen_shot_ids = set()
             self._already_archived_current = False
+            # A new GSPro session gets its own archive: drop the previous
+            # session's id and shot count so the next _finalize_buffer writes a
+            # new file rather than overwriting the round just archived above.
+            self._session_id = None
+            self._archived_shot_count = 0
+            self._last_shot_at = None
             # Cleared only AFTER _finalize_buffer above has used it, so the round
             # being archived keeps its club data and the new one starts clean.
             self._club_data_by_shot = {}
@@ -234,6 +288,12 @@ class LiveRoundWatcher:
     def _add_new_shot(self, raw_shot: dict) -> None:
         self._seen_shot_ids.add(raw_shot.get("ShotID"))
         self._buffer.append(raw_shot)
+        self._last_shot_at = time.monotonic()
+        # A genuinely new shot means this file state is NOT the one already
+        # archived, whatever a previous run recorded. Without clearing this, a
+        # session resumed after an app restart could never archive again — the
+        # startup dedup flag would block it right through to the next round.
+        self._already_archived_current = False
         # Club-mapping diagnostic: every non-trajectory field, so you can hit a
         # known club, read logs/simanalytics.log, and see which field (ClubIndex
         # or otherwise) actually identifies it — then fill in
@@ -357,18 +417,37 @@ class LiveRoundWatcher:
         except OSError:
             log.exception("Failed to persist live round watcher archive state")
 
-    def _finalize_buffer(self) -> dict | None:
+    def _finalize_buffer(self, idle: bool = False) -> dict | None:
         """Archive the current buffer if there's anything new to archive.
-        Returns the archive-summary dict (same shape as archive_round's) when
-        a round was actually written, or None when there was nothing to do
-        (empty buffer, or this exact file state was already archived)."""
+
+        Returns the archive-summary dict (same shape as archive_round's) when a
+        round was actually written, or None when there was nothing to do (empty
+        buffer, or every shot in it is already archived).
+
+        Re-entrant by design: the idle path can archive a session that later
+        resumes, and calling this again then REWRITES the same session_id
+        rather than creating a second one. That's what makes archiving early
+        safe — an idle flush is never a commitment that the session is over.
+        """
         if not self._buffer or self._already_archived_current:
             return None
+        if len(self._buffer) <= self._archived_shot_count:
+            return None  # every buffered shot is already on disk
         lm_info = detect_lm(self.lm_log_dir) if self.lm_log_dir else {}
         info = archive_round(self._buffer, self.data_dir, self.raw_archive_dir,
                              club_lookup=self.club_lookup, lm_info=lm_info,
-                             club_data_by_shot=self._club_data_by_shot)
-        self._already_archived_current = True
+                             club_data_by_shot=self._club_data_by_shot,
+                             session_id=self._session_id)
+        # Tells the UI this archive came from the session going quiet rather
+        # than from a round boundary, so it can repaint at once instead of
+        # debouncing against shots that have already stopped.
+        info["idle"] = idle
+        # True when this session already had an archive on disk — i.e. it went
+        # quiet, was written out, and then the user came back and hit more. The
+        # UI says "updated" rather than announcing the same round twice.
+        info["updated"] = self._archived_shot_count > 0
+        self._session_id = info["session_id"]
+        self._archived_shot_count = len(self._buffer)
         self._last_archived_mtime = self._last_mtime
         self._persist_last_archived_mtime()
         log.info(

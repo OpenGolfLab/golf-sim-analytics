@@ -138,6 +138,87 @@ def test_player_from_shots_empty():
     assert players.player_from_shots(None) == ""
 
 
+def test_player_from_shots_is_empty_for_a_multiplayer_round():
+    """A fourball can't be tagged with one name — it resolves per shot."""
+    shots = [{"PlayerName": "Tyler"}, {"PlayerName": "Sam"}, {"PlayerName": "Tyler"}]
+    assert players.player_from_shots(shots) == ""
+
+
+def test_players_in_shots_lists_everyone():
+    shots = [{"PlayerName": "Tyler"}, {"PlayerName": "Sam"},
+             {"PlayerName": "Tyler"}, {"PlayerName": "Practice"}]
+    assert players.players_in_shots(shots) == ["Sam", "Tyler"]
+
+
+def test_players_in_shots_empty():
+    assert players.players_in_shots([]) == []
+    assert players.players_in_shots([{"PlayerName": "Practice"}]) == []
+
+
+# --- per-shot attribution (multiplayer on-course rounds) ------------------
+
+def test_per_shot_name_wins_over_session_tag():
+    """Players alternate every shot on course; nobody is flipping a selector,
+    so GSPro's own per-shot name has to decide."""
+    df = pd.DataFrame({
+        "session_id": ["r1"] * 4,
+        "player_name": ["Tyler", "Sam", "Tyler", "Sam"],
+        "club": ["Dr"] * 4,
+        "carry": [250, 230, 245, 235],
+    })
+    out = players.apply_players(df, {"r1": "Whoever"})
+    assert list(out[players.PLAYER_COLUMN]) == ["Tyler", "Sam", "Tyler", "Sam"]
+
+
+def test_range_sentinel_falls_back_to_the_session_tag():
+    """GSPro writes "Practice" for every range shot — that must not become a
+    golfer, and must not block the session tag either."""
+    df = pd.DataFrame({
+        "session_id": ["s1", "s1"],
+        "player_name": ["Practice", "Practice"],
+        "club": ["Dr", "Dr"],
+        "carry": [250, 260],
+    })
+    out = players.apply_players(df, {"s1": "Tyler"})
+    assert list(out[players.PLAYER_COLUMN]) == ["Tyler", "Tyler"]
+
+
+def test_mixed_named_and_unnamed_shots():
+    df = pd.DataFrame({
+        "session_id": ["s1", "s1", "s1"],
+        "player_name": ["Sam", None, "Practice"],
+        "club": ["Dr"] * 3,
+        "carry": [250, 260, 270],
+    })
+    out = players.apply_players(df, {"s1": "Tyler"})
+    assert list(out[players.PLAYER_COLUMN]) == ["Sam", "Tyler", "Tyler"]
+
+
+def test_multiplayer_round_filters_per_shot():
+    df = pd.DataFrame({
+        "session_id": ["r1"] * 4,
+        "player_name": ["Tyler", "Sam", "Tyler", "Sam"],
+        "club": ["Dr"] * 4,
+        "carry": [250, 230, 245, 235],
+    })
+    df = players.apply_players(df, {})
+    out = filters_mod.filter_master_data(
+        df, filters_mod.TIME_ALL, filters_mod.CLUB_ALL,
+        filters_mod.QUALITY_ALL, player_filter="Sam")
+    assert list(out["carry"]) == [230, 235]
+
+
+def test_backfill_skips_multiplayer_rounds(tmp_path):
+    """No session-level tag for a fourball — the per-shot column owns it."""
+    raw = tmp_path / "live_rounds_raw"
+    raw.mkdir(parents=True)
+    (raw / "live-07-19-26-13-12-04-on_course.json").write_text(
+        json.dumps([{"PlayerName": "Tyler", "RoundID": 7},
+                    {"PlayerName": "Sam", "RoundID": 7}]), encoding="utf-8")
+    assert players.backfill_from_archives(tmp_path, raw) == 0
+    assert players.load_players(tmp_path) == {}
+
+
 # --- backfill -------------------------------------------------------------
 
 def _write_raw(raw_dir, session_id, name, round_id=7):

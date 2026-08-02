@@ -18,7 +18,7 @@ from pathlib import Path
 # bundles (see contribute.py) so shared data is traceable to a build. Also
 # shown at the bottom of the Settings panel, so "which build am I actually
 # running?" is answerable at a glance — bump this on any user-visible change.
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.7.1"
 
 # OpenGolfLab intake Worker. Paste your deployed Cloudflare Worker URL here to
 # enable one-click "Send to OpenGolfLab" in the Contribute dialog. Leave blank
@@ -182,6 +182,21 @@ LIVE_CLUB_DATA_RETRY_SECONDS = 0.4
 # the heaviest work in the app never runs while shots are coming in.
 # Explicit user actions (End Round, leaving live mode) refresh immediately.
 LIVE_ARCHIVE_REFRESH_QUIET_SECONDS = 10.0
+# How long shots must stop before a session archives itself.
+#
+# Without this, a round only archived on one of three events: GSPro starting the
+# NEXT round, an explicit End Round, or the app closing. Finish a round in GSPro
+# and walk away and it matched none of them — the shots sat in memory and the
+# dashboards stayed empty until the app was closed and reopened, which is how
+# this got reported ("I have to close out of the app to see the session").
+#
+# 90s is comfortably longer than any gap between shots in a real session (a slow
+# fourball hole, a drink, changing a club) and short enough that the session is
+# waiting for you by the time you walk back to the PC. Archiving early is cheap
+# anyway: a session that resumes re-archives IN PLACE under the same session id
+# (see LiveRoundWatcher._finalize_buffer), so an early flush can't fragment a
+# session into two.
+LIVE_IDLE_ARCHIVE_SECONDS = 90.0
 
 # Full-fidelity raw JSON snapshot of every finalized live-tracked round
 # (every field GSPro wrote, including full ball-flight trajectories) lives

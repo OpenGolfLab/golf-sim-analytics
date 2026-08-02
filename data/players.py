@@ -40,6 +40,8 @@ log = logging.getLogger(__name__)
 
 _PLAYERS_FILE = "players.json"
 PLAYER_COLUMN = "player"
+# Per-shot name as GSPro wrote it, carried through from live/shot_data.py.
+SHOT_NAME_COLUMN = "player_name"
 
 # Sessions with no attribution. Shown in the UI as a real, selectable bucket
 # rather than hidden — a user who never opens the Player menu still sees all
@@ -61,7 +63,13 @@ NAME_MAX = 24
 def normalize_name(name: str) -> str:
     """Trim and length-cap a player name. Returns "" for anything blank or
     for GSPro's practice-range sentinel, which is never a real golfer."""
-    cleaned = " ".join(str(name or "").split())
+    # NaN check before the falsy check, because NaN is TRUTHY: a missing name
+    # read out of a DataFrame column would otherwise sail through
+    # `name or ""` and come back as the literal string "nan" — a golfer called
+    # nan appearing in the Player menu.
+    if name is None or name != name:
+        return ""
+    cleaned = " ".join(str(name).split())
     if not cleaned or cleaned.lower() == _RANGE_SENTINEL:
         return ""
     return cleaned[:NAME_MAX]
@@ -139,16 +147,35 @@ def rename_player(data_dir, old: str, new: str) -> dict[str, str]:
 
 
 def apply_players(df: pd.DataFrame, players: dict[str, str]) -> pd.DataFrame:
-    """Return a copy of ``df`` with a ``player`` column populated from
-    ``players`` (by session_id). Unassigned rows get "" — no row is dropped
-    and the Parquet history is never touched."""
+    """Return a copy of ``df`` with a ``player`` column.
+
+    Two sources, in priority order:
+
+    1. **The shot's own ``player_name``**, captured from GSPro. On course,
+       GSPro stamps every single shot with whoever hit it, so a fourball
+       resolves per shot with nobody touching a control — which is the only
+       workable answer, since players alternate constantly and no human is
+       going to flip a selector between drives.
+    2. **The session sidecar**, for everything shot 1 can't answer: the
+       practice range (GSPro writes the constant "Practice" there) and CSV
+       imports (no identity field at all).
+
+    Unattributed rows get "". No row is dropped, and Parquet is never touched.
+    """
     if df.empty:
         return df
     out = df.copy()
-    if "session_id" not in out.columns:
-        out[PLAYER_COLUMN] = UNASSIGNED
-        return out
-    out[PLAYER_COLUMN] = out["session_id"].astype(str).map(players).fillna(UNASSIGNED)
+    by_session = (out["session_id"].astype(str).map(players).fillna(UNASSIGNED)
+                  if "session_id" in out.columns
+                  else pd.Series(UNASSIGNED, index=out.index))
+    if SHOT_NAME_COLUMN in out.columns:
+        per_shot = out[SHOT_NAME_COLUMN].map(normalize_name)
+        # Per-shot wins wherever GSPro actually named somebody; the sidecar
+        # fills every other row (including the "Practice" sentinel, which
+        # normalize_name deliberately blanks).
+        out[PLAYER_COLUMN] = per_shot.where(per_shot.astype(bool), by_session)
+    else:
+        out[PLAYER_COLUMN] = by_session
     return out
 
 
@@ -170,20 +197,27 @@ def has_unassigned(df: pd.DataFrame) -> bool:
     return bool((df[PLAYER_COLUMN].fillna(UNASSIGNED) == UNASSIGNED).any())
 
 
-def player_from_shots(raw_shots: list[dict]) -> str:
-    """The golfer GSPro named in a live round's raw records, or "".
+def players_in_shots(raw_shots: list[dict]) -> list[str]:
+    """Every distinct golfer GSPro named across a round's raw records, sorted.
 
-    Only on-course rounds carry a real name; the practice range reports the
-    ``"Practice"`` sentinel, which normalize_name() rejects. The first named
-    shot wins — GSPro writes one profile per round, and scanning rather than
-    reading shot 0 blindly means a round whose opening record is malformed
-    still self-attributes.
+    A GSPro round can hold several players alternating shot for shot, so this
+    is a list rather than a single answer. The practice range contributes
+    nothing (its ``"Practice"`` sentinel is rejected by normalize_name).
     """
-    for shot in raw_shots or []:
-        name = normalize_name(shot.get("PlayerName"))
-        if name:
-            return name
-    return ""
+    names = {normalize_name(s.get("PlayerName")) for s in raw_shots or []}
+    return sorted(n for n in names if n)
+
+
+def player_from_shots(raw_shots: list[dict]) -> str:
+    """The one golfer this round belongs to, or "" if that's ambiguous.
+
+    Deliberately empty for a multi-player round: a session-level tag can only
+    name one person, so applying one to a fourball would be a lie. Those rounds
+    are attributed per shot instead (see apply_players), which is both accurate
+    and the only thing that scales to players swapping every shot.
+    """
+    names = players_in_shots(raw_shots)
+    return names[0] if len(names) == 1 else ""
 
 
 def backfill_from_archives(data_dir, raw_archive_dir) -> int:
@@ -209,7 +243,11 @@ def backfill_from_archives(data_dir, raw_archive_dir) -> int:
         except (OSError, ValueError):
             log.exception("backfill_from_archives: unreadable %s — skipping", raw_path)
             continue
-        name = player_from_shots(raw_shots if isinstance(raw_shots, list) else [])
+        shots = raw_shots if isinstance(raw_shots, list) else []
+        # Multi-player rounds are left out on purpose — they resolve per shot
+        # from the archived player_name column, and a session-level tag would
+        # hand the whole fourball to whoever happened to tee off first.
+        name = player_from_shots(shots)
         if name:
             found[session_id] = name
     if found:

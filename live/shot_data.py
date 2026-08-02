@@ -201,6 +201,7 @@ def archive_round(
     club_lookup=None,
     lm_info: dict | None = None,
     club_data_by_shot: dict[str, dict] | None = None,
+    session_id: str | None = None,
 ) -> dict:
     """Archive one finished round: a flattened Parquet file (joins every
     other archived session in every dashboard) plus a raw JSON snapshot
@@ -232,7 +233,25 @@ def archive_round(
     """
     finalized_at = finalized_at or datetime.now()
     round_type = round_type_for(raw_shots)
-    session_id = f"{finalized_at.strftime(SESSION_ID_FORMAT)}-{round_type}"
+    # An explicit id lets a session that goes idle and then RESUMES rewrite its
+    # own archive instead of spawning a second one (see LiveRoundWatcher's
+    # idle-archive path). Same id -> same Parquet path -> overwrite.
+    if session_id:
+        parquet_path = data_dir / f"{session_id}.parquet"
+    else:
+        # Generated ids are second-resolution, so two DIFFERENT sessions
+        # finalized inside the same second would collide and the second would
+        # silently overwrite the first. Rare in the wild, total data loss when
+        # it happens — so disambiguate rather than clobber. (An explicit
+        # session_id is exempt: overwriting is exactly what it's asking for.)
+        session_id = f"{finalized_at.strftime(SESSION_ID_FORMAT)}-{round_type}"
+        parquet_path = data_dir / f"{session_id}.parquet"
+        suffix = 2
+        while parquet_path.exists():
+            session_id = (f"{finalized_at.strftime(SESSION_ID_FORMAT)}"
+                          f"-{round_type}-{suffix}")
+            parquet_path = data_dir / f"{session_id}.parquet"
+            suffix += 1
 
     # Archive-time club lookups come as a burst — one per shot, all within
     # milliseconds. Collapse that to a single GSPro.db read via snapshot()
@@ -279,7 +298,6 @@ def archive_round(
         df["lm_connect_type"] = lm_info["connect_type"]
         df["lm_type_code"] = lm_info.get("lm_type_code") or None
 
-    parquet_path = data_dir / f"{session_id}.parquet"
     df.to_parquet(parquet_path, engine="pyarrow", index=False)
 
     raw_path = raw_archive_dir / f"{session_id}.json"
@@ -302,8 +320,12 @@ def archive_round(
         "club_data_shots": club_data_shots,
         "parquet_path": parquet_path,
         "raw_path": raw_path,
-        # The golfer GSPro named, when it named one (on-course rounds only —
-        # see data/players.py). "" on the range, where the caller falls back to
-        # whoever the Player selector says is hitting.
+        # The golfer GSPro named, when exactly one hit this round (on-course
+        # only — see data/players.py). "" on the range, and "" for a
+        # multi-player round, which is attributed per shot instead.
         "player": players.player_from_shots(raw_shots),
+        # Everyone who hit in this round, so the caller can tell "nobody was
+        # named" (range) from "several people were" (fourball) — they need
+        # opposite handling.
+        "players": players.players_in_shots(raw_shots),
     }

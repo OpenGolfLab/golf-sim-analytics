@@ -669,6 +669,10 @@ class SimAnalyticsApp:
             poll_interval=config.LIVE_POLL_SECONDS,
             club_data_retries=config.LIVE_CLUB_DATA_RETRIES,
             club_data_retry_interval=config.LIVE_CLUB_DATA_RETRY_SECONDS,
+            # Archive a session once the shots stop, so finishing a round and
+            # walking away is enough to make it appear — no End Round click and
+            # no app restart (see config.LIVE_IDLE_ARCHIVE_SECONDS).
+            idle_archive_seconds=config.LIVE_IDLE_ARCHIVE_SECONDS,
             # Enriches live/archived range shots with club speed, smash and AoA
             # from GSPro.db (currentRound.dat doesn't carry them).
             club_lookup=ClubDataLookup(gspro_dir / "GSPro.db"),
@@ -1164,20 +1168,28 @@ class SimAnalyticsApp:
         except Exception:
             log.exception("Claiming unassigned sessions failed — continuing")
 
-    def _attribute_session(self, session_id: str, gspro_name: str = "") -> str:
+    def _attribute_session(self, session_id: str, gspro_name: str = "",
+                           gspro_names=()) -> str:
         """File a just-captured session under a golfer, and return that name.
 
-        GSPro's own PlayerName wins when there is one (on-course rounds), since
-        it's what the golfer actually selected in GSPro rather than what this
-        app was left set to. Otherwise the active player is used. Neither
-        available means the session stays unassigned, which is exactly right
-        for a single-golfer install that has never opened this feature.
+        Three cases, because GSPro gives three different amounts of help:
 
-        A name GSPro supplies also becomes the active player: on-course rounds
-        are the only place the app can learn a real name by itself, so that's
-        how a second golfer in the house gets discovered without anyone typing
-        anything.
+        * **Several golfers named** (a fourball) — no session tag at all. Every
+          shot already carries its own PlayerName into the archive, so the round
+          resolves per shot (see players.apply_players). Tagging the session
+          would hand the whole round to whoever teed off first, and the active
+          player is left alone: "who's hitting next" is meaningless mid-fourball.
+        * **Exactly one golfer named** (a solo round) — that name wins over the
+          app's setting, because it's what the golfer actually picked in GSPro.
+          It also becomes the active player, which is how a second person in the
+          house gets discovered without anyone typing anything.
+        * **Nobody named** (range, CSV) — fall back to the active player, or
+          leave it unassigned on a single-golfer install that never set one.
         """
+        named = [players_mod.normalize_name(n) for n in gspro_names]
+        if len([n for n in named if n]) > 1:
+            return ""
+
         name = players_mod.normalize_name(gspro_name)
         if name:
             if name != players_mod.normalize_name(self.settings_active_player.get()):
@@ -1735,14 +1747,22 @@ class SimAnalyticsApp:
         CSV-ingested session would) and to a raw JSON snapshot tagged with
         round_type, under config.LIVE_ROUNDS_RAW_DIR."""
         self.live_shot_buffer.clear()
-        self._attribute_session(info["session_id"], gspro_name=info.get("player"))
+        self._attribute_session(info["session_id"], gspro_name=info.get("player"),
+                                gspro_names=info.get("players") or [])
         label = "practice" if info["round_type"] == "practice" else "on-course"
         plural = "s" if info["shot_count"] != 1 else ""
-        show_toast(
-            self.root,
-            f"Archived {info['shot_count']} live-tracked shot{plural} from your {label} round.",
-            tone="success",
-        )
+        if info.get("updated"):
+            # The session was archived when it went quiet and has now grown —
+            # don't announce the same round a second time as if it were new.
+            message = (f"Session updated — {info['shot_count']} shot{plural} "
+                       f"now saved.")
+        elif info.get("idle"):
+            message = (f"Session saved — {info['shot_count']} shot{plural} from "
+                       f"your {label} round are in your dashboards.")
+        else:
+            message = (f"Archived {info['shot_count']} live-tracked shot{plural} "
+                       f"from your {label} round.")
+        show_toast(self.root, message, tone="success")
         # Say so when a practice round lands without club speed. currentRound.dat
         # never carries it — it comes from GSPro.db's DrivingRangeShot table, which
         # GSPro clears when a range session ends — so this can still fail, and a
@@ -1765,7 +1785,10 @@ class SimAnalyticsApp:
         # go quiet. Explicit user actions (End Round, leaving live mode) set
         # _refresh_now_on_archive because the user is at the app waiting to see
         # the round; those refresh immediately, same as before.
-        if self._refresh_now_on_archive:
+        # An idle archive means shots already stopped, so there is nothing left
+        # to debounce — waiting another quiet period would just be the delay the
+        # whole idle mechanism exists to remove.
+        if self._refresh_now_on_archive or info.get("idle"):
             self._refresh_now_on_archive = False
             self._cancel_archive_refresh_job()
             self._archive_refresh_pending = True

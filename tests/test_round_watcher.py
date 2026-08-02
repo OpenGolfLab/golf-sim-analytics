@@ -419,3 +419,132 @@ def test_a_new_round_does_not_inherit_the_previous_rounds_club_data(tmp_path):
     watcher.check_now()
 
     assert set(watcher._club_data_by_shot) == {"z"}, "stale shots carried over"
+
+
+# ---------------------------------------------------------------------------
+# Idle auto-archive.
+#
+# Before this, a session archived only when GSPro started the NEXT round, when
+# the user clicked End Round, or when the app closed. Finishing a round in
+# GSPro and walking away hit none of those, so the session stayed invisible
+# until the app was restarted.
+# ---------------------------------------------------------------------------
+
+def test_idle_archives_after_the_shots_stop(tmp_path):
+    watcher, round_file, data_dir, _raw, _new, archived = _make_watcher(
+        tmp_path, idle_archive_seconds=0.05)
+    _write(round_file, [_shot("a")])
+    watcher.check_now()
+    _write(round_file, [_shot("a"), _shot("b")])
+    watcher.check_now()
+
+    assert archived == []          # still hitting
+    assert watcher.archive_if_idle() is None
+
+    time.sleep(0.06)
+    info = watcher.archive_if_idle()
+    assert info is not None
+    assert info["shot_count"] == 2
+    assert info["idle"] is True
+    assert len(archived) == 1
+    assert (data_dir / f"{info['session_id']}.parquet").exists()
+
+
+def test_idle_archive_is_off_by_default(tmp_path):
+    watcher, round_file, *_ = _make_watcher(tmp_path)
+    _write(round_file, [_shot("a")])
+    watcher.check_now()
+    time.sleep(0.02)
+    assert watcher.archive_if_idle() is None
+
+
+def test_a_resumed_session_rewrites_the_same_archive(tmp_path):
+    """The whole reason archiving early is safe: coming back and hitting more
+    must update the session in place, not split it in two."""
+    watcher, round_file, data_dir, _raw, _new, archived = _make_watcher(
+        tmp_path, idle_archive_seconds=0.05)
+    _write(round_file, [_shot("a"), _shot("b")])
+    watcher.check_now()
+    time.sleep(0.06)
+    first = watcher.archive_if_idle()
+    assert first["shot_count"] == 2
+
+    # User comes back and hits two more.
+    _write(round_file, [_shot("a"), _shot("b"), _shot("c"), _shot("d")])
+    watcher.check_now()
+    time.sleep(0.06)
+    second = watcher.archive_if_idle()
+
+    assert second["session_id"] == first["session_id"]
+    assert second["shot_count"] == 4
+    assert second["updated"] is True
+    assert len(list(data_dir.glob("live-*.parquet"))) == 1
+    assert len(pd.read_parquet(data_dir / f"{second['session_id']}.parquet")) == 4
+
+
+def test_idle_archive_does_not_repeat_with_no_new_shots(tmp_path):
+    watcher, round_file, *_rest, archived = _make_watcher(
+        tmp_path, idle_archive_seconds=0.05)
+    _write(round_file, [_shot("a")])
+    watcher.check_now()
+    time.sleep(0.06)
+    assert watcher.archive_if_idle() is not None
+    assert watcher.archive_if_idle() is None
+    assert len(archived) == 1
+
+
+def test_a_new_gspro_round_starts_its_own_archive(tmp_path):
+    """An idle-archived session must not be overwritten by the next round."""
+    watcher, round_file, data_dir, _raw, _new, archived = _make_watcher(
+        tmp_path, idle_archive_seconds=0.05)
+    _write(round_file, [_shot("a")])
+    watcher.check_now()
+    time.sleep(0.06)
+    first = watcher.archive_if_idle()
+
+    _write(round_file, [_shot("z")])          # GSPro reset the log
+    watcher.check_now()
+    _write(round_file, [_shot("z"), _shot("y")])
+    watcher.check_now()
+    time.sleep(0.06)
+    second = watcher.archive_if_idle()
+
+    assert second["session_id"] != first["session_id"]
+    assert len(list(data_dir.glob("live-*.parquet"))) == 2
+
+
+def test_finalize_now_after_an_idle_archive_adds_nothing(tmp_path):
+    watcher, round_file, data_dir, *_ = _make_watcher(
+        tmp_path, idle_archive_seconds=0.05)
+    _write(round_file, [_shot("a")])
+    watcher.check_now()
+    time.sleep(0.06)
+    watcher.archive_if_idle()
+    assert watcher.finalize_now() is None
+    assert len(list(data_dir.glob("live-*.parquet"))) == 1
+
+
+def test_archived_round_reports_every_player(tmp_path):
+    """On-course rounds carry a real name per shot; a fourball reports all of
+    them so the app knows not to tag the session with one."""
+    watcher, round_file, *_rest, archived = _make_watcher(
+        tmp_path, idle_archive_seconds=0.05)
+    _write(round_file, [_shot("a", round_id=7, player="Tyler"),
+                        _shot("b", round_id=7, player="Sam")])
+    watcher.check_now()
+    time.sleep(0.06)
+    info = watcher.archive_if_idle()
+    assert info["players"] == ["Sam", "Tyler"]
+    assert info["player"] == ""          # ambiguous — per-shot decides
+
+
+def test_archived_shots_keep_their_player_name(tmp_path):
+    watcher, round_file, data_dir, *_ = _make_watcher(
+        tmp_path, idle_archive_seconds=0.05)
+    _write(round_file, [_shot("a", round_id=7, player="Tyler"),
+                        _shot("b", round_id=7, player="Sam")])
+    watcher.check_now()
+    time.sleep(0.06)
+    info = watcher.archive_if_idle()
+    df = pd.read_parquet(data_dir / f"{info['session_id']}.parquet")
+    assert list(df["player_name"]) == ["Tyler", "Sam"]
